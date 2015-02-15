@@ -265,6 +265,7 @@ type
     procedure SetObjectValue(const Value: TJsonObject);
 
     function GetArrayItem(Index: Integer): TJsonDataValueHelper; inline;
+    function GetArrayCount: Integer;
     function GetObject(const Name: string): TJsonDataValueHelper; inline;
     function GetArray(const Name: string): TJsonArray; inline;
     procedure SetArray(const Name: string; const AValue: TJsonArray);
@@ -300,8 +301,11 @@ type
     property ArrayValue: TJsonArray read GetArrayValue write SetArrayValue;
     property ObjectValue: TJsonObject read GetObjectValue write SetObjectValue;
 
+    // Access to array item count
+    property Count: Integer read GetArrayCount;
     // Access to array items
-    property Item[Index: Integer]: TJsonDataValueHelper read GetArrayItem;
+    property Items[Index: Integer]: TJsonDataValueHelper read GetArrayItem;
+
     // Used to auto create arrays
     property A[const Name: string]: TJsonArray read GetArray write SetArray;
     // Used to auto create objects and as default property where no Implicit operator matches
@@ -5676,6 +5680,11 @@ end;
 function TJsonDataValueHelper.GetArrayItem(Index: Integer): TJsonDataValueHelper;
 begin
   Result := ArrayValue.Values[Index];
+end;
+
+function TJsonDataValueHelper.GetArrayCount: Integer;
+begin
+  Result := ArrayValue.Count;
 end;
 
 procedure TJsonDataValueHelper.SetArray(const Name: string; const AValue: TJsonArray);

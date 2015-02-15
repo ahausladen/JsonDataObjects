@@ -1589,7 +1589,7 @@ begin
 
     O['NewObject']['Array'] := TJsonArray.Create;
     O['NewObject']['Array'].ArrayValue.Add(1);
-    I := O['NewObject']['Array'].Item[0];
+    I := O['NewObject']['Array'].Items[0];
     CheckEquals(1, I);
 
     CheckEquals('{"NewArray":[],"NewObject":{"Value":"Hello","IntValue":10,"FloatValue":-55.1,"Array":[1]}}', O.ToJSON);
@@ -1679,7 +1679,7 @@ begin
     Obj := TMyObject.Create;
     try
       Obj.NonStored := 'aaa';
-      O.ToSimpleObject(Obj, True);
+      O.ToSimpleObject(Obj, False);
       CheckEqualsString('Hello World!', Obj.MyString);
       CheckEquals(135711, Obj.MyInt);
       CheckEquals(135711131719232931, Obj.MyInt64);

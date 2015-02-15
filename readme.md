@@ -35,8 +35,9 @@ begin
   Obj := TJsonObject.Parse('{ "foo": "bar", "array": [ 10, 20 ] }') as TJsonObject;
   try
     ShowMessage(Obj['foo']);
-    ShowMessage(IntToStr(Obj['array'].Item[0]));
-    ShowMessage(IntToStr(Obj['array'].Item[1]));
+    ShowMessage(IntToStr(Obj['array'].Count));
+    ShowMessage(IntToStr(Obj['array'].Items[0]));
+    ShowMessage(IntToStr(Obj['array'].Items[1]));
   finally
     Obj.Free;
   end;
