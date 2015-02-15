@@ -4077,9 +4077,6 @@ begin
   end;
 end;
 
-type
-  TStringBuilderAccess = class(TStringBuilder);
-
 procedure TJsonOutputWriter.StreamFlush;
 var
   Bytes: TBytes;
