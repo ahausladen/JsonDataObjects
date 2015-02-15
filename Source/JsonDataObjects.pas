@@ -1,0 +1,5910 @@
+(*****************************************************************************
+The MIT License (MIT)
+
+Copyright (c) 2015 Andreas Hausladen
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+*****************************************************************************)
+
+{$A8,B-,C+,E-,F-,G+,H+,I+,J-,K-,M-,N-,O+,P+,Q-,R-,S-,T-,U-,V+,W-,X+,Z1}
+{$WARN WIDECHAR_REDUCED OFF} // All sets only use ASCII chars (<=#127) and the compiler generates the >=#128 check itself
+{$STRINGCHECKS OFF} // It only slows down Delphi strings, doesn't help C++Builder migration and is finally gone in XE+
+{$WARN SYMBOL_DEPRECATED OFF} // for StrLen/StrLComp
+{$POINTERMATH ON}
+
+unit JsonDataObjects;
+
+{$IFDEF VER200}
+  // Delphi 2009's ErrorInsight parser uses the CompilerVersion's memory address instead of 20.0, failing all the
+  // IF CompilerVersion compiler directives
+  {$DEFINE CPUX86}
+{$ELSE}
+  {$IF CompilerVersion >= 24.0} // XE3 and newer
+    {$LEGACYIFEND ON}
+  {$IFEND}
+  {$IF CompilerVersion >= 23.0}
+    {$DEFINE HAS_UNIT_SCOPE}
+    {$DEFINE HAS_RETURN_ADDRESS}
+  {$IFEND}
+  {$IF CompilerVersion <= 22.0} // XE and older
+    {$DEFINE CPUX86}
+  {$IFEND}
+{$ENDIF VER200}
+
+
+// Sanity checks all array index accesses and raise an EListError exception.
+{$DEFINE CHECK_ARRAY_INDEX}
+
+// Use the special TJsonStringBuilder instead of native string concatination.
+{$DEFINE USE_JSONSTRINGBUILDER}
+
+// JSON allows the slash to be escaped. This is only necessary if you plan to put the JSON string
+// into a <script>-Tag because then "</" can't be used and must be escaped to "<\/". This switch
+// enables the special handling for "</" but makes the parser slightly slower.
+{.$DEFINE ESCAPE_SLASH_AFTER_LESSTHAN}
+
+// When parsing a JSON string the pair names are interned to reduce the memory foot print. This
+// Slightly slows down the parser but saves a lot of memory if the JSON string contains repeating
+// pair names. The interning uses a hashset to store the strings.
+{$DEFINE USE_STRINGINTERN_FOR_NAMES}
+
+// Use an optimized NewInstance implementation. It skips the initialization of the interface table.
+// and seals the TJsonArray and TJsonObject classes because it isn't safe to derive from them.
+{$DEFINE USE_FAST_NEWINSTANCE}
+
+//{$IF CompilerVersion < 28.0} // XE6 and older
+  // The XE7 compiler is broken. It doesn't collapse duplicate string literals anymore. (RSP-10015)
+  // But if the string literals are used in loops this optimization still helps.
+
+  // Optimizes the following pattern:
+  //   O['Name'][MyPropStr]
+  //   O['Name']['MyProp'].
+  // where the second O['Name'] is handled very fast by caching the pointer to the 'Name' string literal.
+  {$DEFINE USE_LAST_NAME_STRING_LITERAL_CACHE}
+//{$IFEND}
+
+// When parsing the JSON string, the UStrAsg calls are skipped for internal strings what eliminates
+// the CPU locks for those string assignments.
+{$DEFINE USE_FAST_STRASG_FOR_INTERNAL_STRINGS}
+
+{$IFDEF AUTOREFCOUNT}
+  // Delphi's ARC is slow (RSP-9712). This switch enables a faster ARC handling and even skips memory
+  // barrier were possible.
+  {$DEFINE USE_FAST_AUTOREFCOUNT}
+{$ENDIF AUTOREFCOUNT}
+
+{$IFDEF MSWINDOWS}
+  // When adding JSON object properties with string literals, the string literals are stored directly
+  // in the "Name" field instead of using UStrAsg that creates a new heap string. This improves the
+  // performance as no string is copied and it slighly reduces the memory usage.
+  // The string literals are only used if they are in the main instance or the DLL that contains the
+  // JsonDataObjects unit. Other string literals are copied using UStrAsg because unloading the DLL
+  // that holds them would cause access violations.
+  // This has no effect when parsing JSON strings because then there are no string literals.
+  {$DEFINE USE_NAME_STRING_LITERAL}
+
+  // Reading a large file >64 MB from a network drive in Windows 2003 Server or older can lead to
+  // an INSUFFICIENT RESOURCES error. By enabling this switch, large files are read in 20 MB blocks.
+  {$DEFINE WORKAROUND_NETWORK_FILE_INSUFFICIENT_RESOURCES}
+{$ENDIF MSWINDOWS}
+
+interface
+
+uses
+  {$IFDEF HAS_UNIT_SCOPE}
+  System.SysUtils, System.Classes;
+  {$ELSE}
+  SysUtils, Classes;
+  {$ENDIF HAS_UNIT_SCOPE}
+
+type
+  TJsonBaseObject = class;
+  TJsonObject = class;
+  TJsonArray = class;
+
+  EJsonException = class(Exception);
+  EJsonParserException = class(EJsonException);
+
+  // TJsonOutputWriter is used to write the JSON data to a string, stream or TStrings in a compact
+  // or human readable format.
+  TJsonOutputWriter = record
+  private type
+    TLastType = (ltInitial, ltIndent, ltUnindent, ltIntro, ltValue, ltSeparator);
+
+    PJsonStringBuilder = ^TJsonStringBuilder;
+    TJsonStringBuilder = record
+    private
+      FData: PChar;
+      FCapacity: Integer;
+      FLen: Integer;
+      procedure Grow(MinLen: Integer);
+    public
+      procedure Init;
+      procedure Done;
+      procedure DoneToString(var S: string);
+      procedure FlushToBytes(var Bytes: TBytes; Encoding: TEncoding);
+
+      function Append(const S: string): PJsonStringBuilder; //overload;
+      //function Append(Ch: Char): PJsonStringBuilder; overload;
+      procedure Append3(Ch1: Char; const S2, S3: string);
+      //function ToString: string;
+
+      property Len: Integer read FLen;
+      property Data: PChar read FData;
+    end;
+  private
+    FLastType: TLastType;
+    FStringBufferMode: Boolean;
+    {$IFDEF USE_JSONSTRINGBUILDER}
+    FStringBuffer: TJsonStringBuilder;
+    {$ELSE}
+    FStringBuffer: string;         // used when building the compact format
+    {$ENDIF USE_JSONSTRINGBUILDER}
+    FLines: TStrings;              // used for building the human readable format
+    FLastLine: string;
+    FLinesBufferLen: Integer;
+    FLineBreakLen: Integer;
+
+    FStream: TStream;                // used when writing to a stream
+    FEncoding: TEncoding;            // used when writing to a stream
+
+    FIndents: array of string;     // buffer for line indention strings
+    FIndent: Integer;              // current indention level
+
+    procedure StreamFlushPossible;   // checks if StreamFlush must be called
+    procedure StreamFlush;           // writes the buffer to the stream
+    procedure ExpandIndents;
+    procedure AppendLine(AppendOn: TLastType; const S: string);
+    procedure FlushLastLine;
+  private // unit private
+    procedure Init(ACompact: Boolean; AStream: TStream; AEncoding: TEncoding; ALines: TStrings);
+    function Done: string;
+    procedure StreamDone;
+    procedure LinesDone;
+
+    procedure Indent(const S: string);
+    procedure Unindent(const S: string);
+    procedure AppendIntro(const S: string);
+    procedure AppendValue(const S: string);
+    procedure AppendStrValue(const S: string);
+    procedure AppendSeparator(const S: string);
+  end;
+
+  TJsonDataType = (
+    jdtNone, jdtString, jdtInt, jdtLong, jdtFloat, jdtBool, jdtArray, jdtObject
+  );
+
+  // TJsonDataValue holds the actual value
+  PJsonDataValue = ^TJsonDataValue;
+  TJsonDataValue = packed record
+  private type
+    TJsonDataValueRec = record
+      case TJsonDataType of
+        jdtNone: (P: PChar);     // helps when debugging
+        jdtString: (S: Pointer); // We manage the string ourself. Delphi doesn't allow "string" in a
+                                 // variant record and if we have no string, we don't need to clean
+                                 // it up, anyway.
+        jdtInt: (I: Integer);
+        jdtLong: (L: Int64);
+        jdtFloat: (F: Double);
+        jdtBool: (B: Boolean);
+        jdtArray: (A: Pointer);  // owned by TJsonDataValue
+        jdtObject: (O: Pointer); // owned by TJsonDataValue
+    end;
+  private
+    FValue: TJsonDataValueRec;
+    FTyp: TJsonDataType;
+    function GetValue: string;
+    function GetIntValue: Integer;
+    function GetLongValue: Int64;
+    function GetFloatValue: Double;
+    function GetBoolValue: Boolean;
+    function GetArrayValue: TJsonArray;
+    function GetObjectValue: TJsonObject;
+
+    procedure SetValue(const AValue: string);
+    procedure SetIntValue(const AValue: Integer);
+    procedure SetLongValue(const AValue: Int64);
+    procedure SetFloatValue(const AValue: Double);
+    procedure SetBoolValue(const AValue: Boolean);
+    procedure SetArrayValue(const AValue: TJsonArray);
+    procedure SetObjectValue(const AValue: TJsonObject);
+
+    procedure InternToJSON(var Writer: TJsonOutputWriter);
+    procedure InternSetValue(const AValue: string); // skips the call to Clear()
+    procedure InternSetValueTransfer(var AValue: string); // skips the call to Clear() and transfers the string without going through UStrAsg+UStrClr
+    procedure InternSetArrayValue(const AValue: TJsonArray);
+    procedure InternSetObjectValue(const AValue: TJsonObject);
+    procedure Clear;
+    procedure TypeCastError(ExpectedType: TJsonDataType);
+  public
+    property Typ: TJsonDataType read FTyp;
+    property Value: string read GetValue write SetValue;
+    property IntValue: Integer read GetIntValue write SetIntValue;
+    property LongValue: Int64 read GetLongValue write SetLongValue;
+    property FloatValue: Double read GetFloatValue write SetFloatValue;
+    property BoolValue: Boolean read GetBoolValue write SetBoolValue;
+    property ArrayValue: TJsonArray read GetArrayValue write SetArrayValue;
+    property ObjectValue: TJsonObject read GetObjectValue write SetObjectValue;
+  end;
+
+  // TJsonDataValueHelper is used to implement the "easy access" functionality. It is
+  // slightly slower than using the direct indexed properties.
+  TJsonDataValueHelper = record
+  private
+    function GetValue: string; inline;
+    function GetIntValue: Integer; inline;
+    function GetLongValue: Int64; inline;
+    function GetFloatValue: Double; inline;
+    function GetBoolValue: Boolean; inline;
+    function GetArrayValue: TJsonArray; inline;
+    function GetObjectValue: TJsonObject; inline;
+
+    procedure SetValue(const Value: string);
+    procedure SetIntValue(const Value: Integer);
+    procedure SetLongValue(const Value: Int64);
+    procedure SetFloatValue(const Value: Double);
+    procedure SetBoolValue(const Value: Boolean);
+    procedure SetArrayValue(const Value: TJsonArray);
+    procedure SetObjectValue(const Value: TJsonObject);
+
+    function GetArrayItem(Index: Integer): TJsonDataValueHelper; inline;
+    function GetObject(const Name: string): TJsonDataValueHelper; inline;
+    function GetArray(const Name: string): TJsonArray; inline;
+    procedure SetArray(const Name: string; const AValue: TJsonArray);
+
+    function GetTyp: TJsonDataType;
+    procedure ResolveName;
+    class procedure SetInternValue(Item: PJsonDataValue; const Value: TJsonDataValueHelper); static;
+  private
+    procedure SetObject(const Name: string; const Value: TJsonDataValueHelper);
+  public
+    class operator Implicit(const Value: string): TJsonDataValueHelper; overload;
+    class operator Implicit(const Value: TJsonDataValueHelper): string; overload;
+    class operator Implicit(const Value: Integer): TJsonDataValueHelper; overload;
+    class operator Implicit(const Value: TJsonDataValueHelper): Integer; overload;
+    class operator Implicit(const Value: Int64): TJsonDataValueHelper; overload;
+    class operator Implicit(const Value: TJsonDataValueHelper): Int64; overload;
+    class operator Implicit(const Value: Double): TJsonDataValueHelper; overload;
+    class operator Implicit(const Value: TJsonDataValueHelper): Double; overload;
+    class operator Implicit(const Value: Boolean): TJsonDataValueHelper; overload;
+    class operator Implicit(const Value: TJsonDataValueHelper): Boolean; overload;
+    class operator Implicit(const Value: TJsonArray): TJsonDataValueHelper; overload;
+    class operator Implicit(const Value: TJsonDataValueHelper): TJsonArray; overload;
+    class operator Implicit(const Value: TJsonObject): TJsonDataValueHelper; overload;
+    class operator Implicit(const Value: TJsonDataValueHelper): TJsonObject; overload;
+    class operator Implicit(const Value: Pointer): TJsonDataValueHelper; overload;
+
+    property Typ: TJsonDataType read GetTyp;
+    property Value: string read GetValue write SetValue;
+    property IntValue: Integer read GetIntValue write SetIntValue;
+    property LongValue: Int64 read GetLongValue write SetLongValue;
+    property FloatValue: Double read GetFloatValue write SetFloatValue;
+    property BoolValue: Boolean read GetBoolValue write SetBoolValue;
+    property ArrayValue: TJsonArray read GetArrayValue write SetArrayValue;
+    property ObjectValue: TJsonObject read GetObjectValue write SetObjectValue;
+
+    // Access to array items
+    property Item[Index: Integer]: TJsonDataValueHelper read GetArrayItem;
+    // Used to auto create arrays
+    property A[const Name: string]: TJsonArray read GetArray write SetArray;
+    // Used to auto create objects and as default property where no Implicit operator matches
+    property O[const Name: string]: TJsonDataValueHelper read GetObject write SetObject; default;
+  private
+    FData: record // hide the data from CodeInsight (bug in CodeInsight)
+      FIntern: PJsonDataValue;
+      FName: string;
+      FNameResolver: TJsonObject;
+      FValue: string; // must be managed by Delphi otherwise we have a memory leak
+      {$IFDEF AUTOREFCOUNT}
+      FObj: TJsonBaseObject;
+      {$ENDIF AUTOREFCOUNT}
+      case FTyp: TJsonDataType of
+        jdtInt: (FIntValue: Integer);
+        jdtLong: (FLongValue: Int64);
+        jdtFloat: (FFloatValue: Double);
+        jdtBool: (FBoolValue: Boolean);
+        {$IFNDEF AUTOREFCOUNT}
+        jdtObject: (FObj: TJsonBaseObject); // used for both Array and Object
+        //jdtArray: (FArrayValue: TJsonArray);
+        //jdtObject: (FObjectValue: TJsonObject);
+        {$ENDIF AUTOREFCOUNT}
+    end;
+  end;
+
+  // TJsonBaseObject is the base class for TJsonArray and TJsonObject
+  TJsonBaseObject = class abstract(TObject)
+  private type
+    TWriterAppendMethod = procedure(const S: string) of object;
+    TStreamInfo = record
+      Buffer: PByte;
+      Size: NativeInt;
+      AllocationBase: Pointer;
+    end;
+  private
+    class procedure StrToJSONStr(const AppendMethod: TWriterAppendMethod; const S: string); static;
+    class procedure EscapeStrToJSONStr(F, P, EndP: PChar; const AppendMethod: TWriterAppendMethod); static;
+    class procedure InternInitAndAssignItem(Dest, Source: PJsonDataValue); static;
+    class procedure GetStreamBytes(Stream: TStream; var Encoding: TEncoding; Utf8WithoutBOM: Boolean;
+      var StreamInfo: TStreamInfo); static;
+
+    {$IFDEF USE_FAST_AUTOREFCOUNT}
+    function ARCObjRelease: Integer; inline;
+    function ARCObjAddRef: Integer; inline;
+    {$ENDIF USE_FAST_AUTOREFCOUNT}
+  protected
+    procedure InternToJSON(var Writer: TJsonOutputWriter); virtual; abstract;
+    class procedure JSONStrToStr(P, EndP: PChar; FirstEscapeIndex: Integer; var S: string); static;
+    class procedure JSONUtf8StrToStr(P, EndP: PByte; FirstEscapeIndex: Integer; var S: string); static;
+  public
+    {$IFDEF USE_FAST_NEWINSTANCE}
+    class function NewInstance: TObject {$IFDEF AUTOREFCOUNT} unsafe {$ENDIF}; override;
+    {$ENDIF USE_FAST_NEWINSTANCE}
+
+    // ParseXxx returns nil if the JSON string is empty or consists only of white chars.
+    // If the JSON string starts with a "[" then the returned object is a TJsonArray otherwise
+    // it is a TJsonObject.
+    {$IFNDEF NEXTGEN}
+    class function ParseUtf8(S: PAnsiChar; Len: Integer = -1): TJsonBaseObject; overload; static; inline;
+    class function ParseUtf8(const S: UTF8String): TJsonBaseObject; overload; static; inline;
+    {$ENDIF ~NEXTGEN}
+    class function ParseUtf8Bytes(S: PByte; Len: Integer = -1): TJsonBaseObject; overload; static;
+    class function Parse(S: PWideChar; Len: Integer = -1): TJsonBaseObject; overload; static;
+    class function Parse(const S: UnicodeString): TJsonBaseObject; overload; static; inline;
+    class function Parse(const Bytes: TBytes; Encoding: TEncoding = nil; ByteIndex: Integer = 0;
+      ByteCount: Integer = -1): TJsonBaseObject; overload; static;
+    class function ParseFromFile(const FileName: string; Utf8WithoutBOM: Boolean = True): TJsonBaseObject; static;
+    class function ParseFromStream(Stream: TStream; Encoding: TEncoding = nil; Utf8WithoutBOM: Boolean = True): TJsonBaseObject; static;
+
+    procedure LoadFromFile(const FileName: string; Utf8WithoutBOM: Boolean = True);
+    procedure LoadFromStream(Stream: TStream; Encoding: TEncoding = nil; Utf8WithoutBOM: Boolean = True);
+    procedure SaveToFile(const FileName: string; Compact: Boolean = True; Encoding: TEncoding = nil; Utf8WithoutBOM: Boolean = True);
+    procedure SaveToStream(Stream: TStream; Compact: Boolean = True; Encoding: TEncoding = nil; Utf8WithoutBOM: Boolean = True);
+    procedure SaveToLines(Lines: TStrings);
+
+    // FromXxxJSON() raises an EJsonParserException if you try to parse an array JSON string into a
+    // TJsonObject or a object JSON string into a TJsonArray.
+    {$IFNDEF NEXTGEN}
+    procedure FromUtf8JSON(const S: UTF8String); overload; inline;
+    procedure FromUtf8JSON(S: PAnsiChar; Len: Integer = -1); overload; inline;
+    {$ENDIF ~NEXTGEN}
+    procedure FromUtf8JSON(S: PByte; Len: Integer = -1); overload;
+    procedure FromJSON(const S: UnicodeString); overload;
+    procedure FromJSON(S: PWideChar; Len: Integer = -1); overload;
+
+    function ToJSON(Compact: Boolean = True): string;
+    // ToString() returns a compact JSON string
+    function ToString: string; override;
+
+    class function JSONToDateTime(const Value: string): TDateTime; static;
+    class function DateTimeToJSON(const Value: TDateTime; UseUtcTime: Boolean): string; static;
+  end;
+
+  PJsonDataValueArray = ^TJsonDataValueArray;
+  TJsonDataValueArray = array[0..MaxInt div SizeOf(TJsonDataValue) - 1] of TJsonDataValue;
+
+  // TJsonArray hold a JSON array and manages the array elements.
+  TJsonArray = class {$IFDEF USE_FAST_NEWINSTANCE}sealed{$ENDIF}(TJsonBaseObject)
+  private
+    FItems: PJsonDataValueArray;
+    FCapacity: Integer;
+    FCount: Integer;
+    function GetString(Index: Integer): string; inline;
+    function GetInt(Index: Integer): Integer; inline;
+    function GetLong(Index: Integer): Int64; inline;
+    function GetFloat(Index: Integer): Double; inline;
+    function GetBool(Index: Integer): Boolean; inline;
+    function GetArray(Index: Integer): TJsonArray; inline;
+    function GetObject(Index: Integer): TJsonObject; inline;
+
+    procedure SetString(Index: Integer; const Value: string); inline;
+    procedure SetInt(Index: Integer; const Value: Integer); inline;
+    procedure SetLong(Index: Integer; const Value: Int64); inline;
+    procedure SetFloat(Index: Integer; const Value: Double); inline;
+    procedure SetBool(Index: Integer; const Value: Boolean); inline;
+    procedure SetArray(Index: Integer; const Value: TJsonArray); inline;
+    procedure SetObject(Index: Integer; const Value: TJsonObject); inline;
+
+    function GetItem(Index: Integer): PJsonDataValue; inline;
+    function GetType(Index: Integer): TJsonDataType; inline;
+    function GetValue(Index: Integer): TJsonDataValueHelper;
+
+    procedure SetValue(Index: Integer; const Value: TJsonDataValueHelper);
+    function AddItem: PJsonDataValue;
+    function InsertItem(Index: Integer): PJsonDataValue;
+
+    procedure Grow;
+    procedure InternApplyCapacity; inline;
+    procedure SetCapacity(const Value: Integer);
+    procedure SetCount(const Value: Integer);
+  protected
+    procedure InternToJSON(var Writer: TJsonOutputWriter); override;
+    class procedure RaiseListError(Index: Integer); static;
+  public
+    destructor Destroy; override;
+
+    procedure Clear;
+    procedure Delete(Index: Integer);
+    procedure Assign(ASource: TJsonArray);
+
+    procedure Add(const AValue: string); overload;
+    procedure Add(AValue: Integer); overload;
+    procedure Add(AValue: Int64); overload;
+    procedure Add(AValue: Double); overload;
+    procedure Add(AValue: Boolean); overload;
+    procedure Add(const AValue: TJsonArray); overload;
+    procedure Add(const AValue: TJsonObject); overload;
+    function AddArray: TJsonArray;
+    function AddObject: TJsonObject; overload;
+    procedure AddObject(const Value: TJsonObject); overload; inline; // makes it easier to add "null"
+
+    procedure Insert(Index: Integer; const AValue: string); overload;
+    procedure Insert(Index: Integer; AValue: Integer); overload;
+    procedure Insert(Index: Integer; AValue: Int64); overload;
+    procedure Insert(Index: Integer; AValue: Double); overload;
+    procedure Insert(Index: Integer; AValue: Boolean); overload;
+    procedure Insert(Index: Integer; const AValue: TJsonArray); overload;
+    procedure Insert(Index: Integer; const AValue: TJsonObject); overload;
+    function InsertArray(Index: Integer): TJsonArray;
+    function InsertObject(Index: Integer): TJsonObject; overload;
+    procedure InsertObject(Index: Integer; const Value: TJsonObject); overload; inline; // makes it easier to insert "null"
+
+    property Types[Index: Integer]: TJsonDataType read GetType;
+    property Values[Index: Integer]: TJsonDataValueHelper read GetValue write SetValue; default;
+
+    {property Strings[Index: Integer]: string read GetString write SetString;
+    property Ints[Index: Integer]: Integer read GetInt write SetInt;
+    property Longs[Index: Integer]: Int64 read GetLong write SetLong;
+    property Floats[Index: Integer]: Double read GetFloat write SetFloat;
+    property Bools[Index: Integer]: Boolean read GetBool write SetBool;
+    property Arrays[Index: Integer]: TJsonArray read GetArray write SetArray;
+    property Objects[Index: Integer]: TJsonObject read GetObject write SetObject;}
+
+    // Short names
+    property S[Index: Integer]: string read GetString write SetString;
+    property I[Index: Integer]: Integer read GetInt write SetInt;
+    property L[Index: Integer]: Int64 read GetLong write SetLong;
+    property F[Index: Integer]: Double read GetFloat write SetFloat;
+    property B[Index: Integer]: Boolean read GetBool write SetBool;
+    property A[Index: Integer]: TJsonArray read GetArray write SetArray;
+    property O[Index: Integer]: TJsonObject read GetObject write SetObject;
+
+    property Items[Index: Integer]: PJsonDataValue read GetItem;
+    property Count: Integer read FCount write SetCount;
+    property Capacity: Integer read FCapacity write SetCapacity;
+  end;
+
+  // TJsonObject hold a JSON object and manages the JSON object properties
+  TJsonObject = class {$IFDEF USE_FAST_NEWINSTANCE}sealed{$ENDIF}(TJsonBaseObject)
+  private type
+    PJsonStringArray = ^TJsonStringArray;
+    TJsonStringArray = array[0..MaxInt div SizeOf(string) - 1] of string;
+  private
+    FItems: PJsonDataValueArray;
+    FNames: PJsonStringArray;
+    FCapacity: Integer;
+    FCount: Integer;
+    {$IFDEF USE_LAST_NAME_STRING_LITERAL_CACHE}
+    FLastValueItem: PJsonDataValue;
+    FLastValueItemNamePtr: Pointer;
+    procedure UpdateLastValueItem(const Name: string; Item: PJsonDataValue);
+    {$ENDIF USE_LAST_NAME_STRING_LITERAL_CACHE}
+    function FindItem(const Name: string; var Item: PJsonDataValue): Boolean;
+    function RequireItem(const Name: string): PJsonDataValue;
+    function GetArray(const Name: string): TJsonArray;
+    function GetBool(const Name: string): Boolean;
+    function GetInt(const Name: string): Integer;
+    function GetObject(const Name: string): TJsonObject;
+    function GetString(const Name: string): string;
+    procedure SetArray(const Name: string; const Value: TJsonArray);
+    procedure SetBool(const Name: string; const Value: Boolean);
+    procedure SetInt(const Name: string; const Value: Integer);
+    procedure SetObject(const Name: string; const Value: TJsonObject);
+    procedure SetString(const Name, Value: string);
+    function GetType(const Name: string): TJsonDataType;
+    function GetFloat(const Name: string): Double;
+    procedure SetFloat(const Name: string; const Value: Double);
+    function GetLong(const Name: string): Int64;
+    procedure SetLong(const Name: string; const Value: Int64);
+    function GetName(Index: Integer): string; inline;
+    function GetItem(Index: Integer): PJsonDataValue; inline;
+    procedure SetValue(const Name: string; const Value: TJsonDataValueHelper);
+    function GetValue(const Name: string): TJsonDataValueHelper;
+
+    { Used from the reader, never every use them outside the reader, they may crash your strings }
+    procedure InternAdd(var AName: string; const AValue: string); overload;
+    procedure InternAdd(var AName: string; AValue: Integer); overload;
+    procedure InternAdd(var AName: string; AValue: Int64); overload;
+    procedure InternAdd(var AName: string; AValue: Double); overload;
+    procedure InternAdd(var AName: string; AValue: Boolean); overload;
+    procedure InternAdd(var AName: string; const AValue: TJsonArray); overload;
+    procedure InternAdd(var AName: string; const AValue: TJsonObject); overload;
+    function InternAddArray(var AName: string): TJsonArray;
+    function InternAddObject(var AName: string): TJsonObject;
+
+    function InternAddItem(var Name: string): PJsonDataValue;
+    function AddItem(const Name: string): PJsonDataValue;
+
+    procedure Grow;
+    procedure InternApplyCapacity;
+    procedure SetCapacity(const Value: Integer);
+  protected
+    procedure InternToJSON(var Writer: TJsonOutputWriter); override;
+    function FindCaseInsensitiveItem(const ACaseInsensitiveName: string): PJsonDataValue;
+  public
+    destructor Destroy; override;
+    procedure Assign(ASource: TJsonObject);
+
+    // ToSimpleObject() maps the JSON object properties to the Delphi object by using the object's
+    // TypeInfo.
+    // The object's class must be compiled with the $M+ compiler switch or derive from TPersistent.
+    procedure ToSimpleObject(AObject: TObject; ACaseSensitive: Boolean = True);
+    // FromSimpleObject() clears the JSON object and adds the Delphi object's properties.
+    // The object's class must be compiled with the $M+ compiler switch or derive from TPersistent.
+    procedure FromSimpleObject(AObject: TObject);
+
+    procedure Clear;
+    procedure Remove(const Name: string);
+    procedure Delete(Index: Integer);
+    function IndexOf(const Name: string): Integer;
+    function Contains(const Name: string): Boolean;
+
+    property Types[const Name: string]: TJsonDataType read GetType;
+    property Values[const Name: string]: TJsonDataValueHelper read GetValue write SetValue; default;
+
+    {property Strings[const Name: string]: string read GetString write SetString;
+    property Ints[const Name: string]: Integer read GetInt write SetInt;
+    property Longs[const Name: string]: Int64 read GetLong write SetLong;
+    property Floats[const Name: string]: Double read GetFloat write SetFloat;
+    property Bools[const Name: string]: Boolean read GetBool write SetBool;
+    property Arrays[const Name: string]: TJsonArray read GetArray write SetArray;
+    property Objects[const Name: string]: TJsonObject read GetObject write SetObject;}
+
+    // Short names
+    property S[const Name: string]: string read GetString write SetString;      // returns '' if property doesn't exist, auto type-cast except for array/object
+    property I[const Name: string]: Integer read GetInt write SetInt;           // return 0 if property doesn't exist, auto type-cast except for array/object
+    property L[const Name: string]: Int64 read GetLong write SetLong;           // return 0 if property doesn't exist, auto type-cast except for array/object
+    property F[const Name: string]: Double read GetFloat write SetFloat;        // return 0 if property doesn't exist, auto type-cast except for array/object
+    property B[const Name: string]: Boolean read GetBool write SetBool;         // return false if property doesn't exist, auto type-cast with "<>'true'" and "<>0" except for array/object
+    property A[const Name: string]: TJsonArray read GetArray write SetArray;    // auto creates array on first access
+    property O[const Name: string]: TJsonObject read GetObject write SetObject; // auto creates object on first access
+
+    // Indexed access to the named properties
+    property Names[Index: Integer]: string read GetName;
+    property Items[Index: Integer]: PJsonDataValue read GetItem;
+    property Count: Integer read FCount;
+    property Capacity: Integer read FCapacity write SetCapacity;
+  end;
+
+  TJsonSerializationConfig = record
+    LineBreak: string;
+    IndentChar: string;
+    UseUtcTime: Boolean;
+  end;
+
+var
+  JsonSerializationConfig: TJsonSerializationConfig = (
+    LineBreak: #10;
+    IndentChar: #9;
+    UseUtcTime: True;
+  );
+
+implementation
+
+uses
+  {$IFDEF HAS_UNIT_SCOPE}
+    {$IFDEF MSWINDOWS}
+  Winapi.Windows,
+    {$ELSE}
+  System.DateUtils,
+    {$ENDIF MSWINDOWS}
+  System.Variants, System.RTLConsts, System.TypInfo, System.Math, System.SysConst;
+
+  {$ELSE}
+
+    {$IFDEF MSWINDOWS}
+  Windows,
+    {$ELSE}
+  DateUtils,
+    {$ENDIF MSWINDOWS}
+  Variants, RTLConsts, TypInfo, Math, SysConst;
+  {$ENDIF HAS_UNIT_SCOPE}
+
+resourcestring
+  RsUnsupportedFileEncoding = 'File encoding is not supported';
+  RsUnexpectedEndOfFile = 'Unexpected end of file where %s was expected';
+  RsUnexpectedToken = 'Expected %s but found %s';
+  RsInvalidHexNumber = 'Invalid hex number "%s"';
+  RsTypeCastError = 'Cannot cast %s into %s';
+  RsMissingClassInfo = 'Class "%s" doesn''t have type information. {$M+} was not specified';
+  {$IFDEF USE_FAST_STRASG_FOR_INTERNAL_STRINGS}
+    {$IFDEF DEBUG}
+  //RsInternAsgStringUsageError = 'InternAsgString was called on a string literal';
+    {$ENDIF DEBUG}
+  {$ENDIF USE_FAST_STRASG_FOR_INTERNAL_STRINGS}
+
+type
+  TJsonTokenKind = (
+    jtkEof, jtkInvalidSymbol,
+    jtkLBrace, jtkRBrace, jtkLBracket, jtkRBracket, jtkComma, jtkColon,
+    jtkIdent,
+    jtkValue, jtkString, jtkInt, jtkFloat, jtkTrue, jtkFalse, jtkNull
+  );
+
+const
+  JsonTokenKindToStr: array[TJsonTokenKind] of string = (
+    'end of file', 'invalid symbol',
+    '"{"', '"}"', '"["', '"]"', '","', '":"',
+    'identifier',
+    'value', 'value', 'value', 'value', 'value', 'value', 'value'
+  );
+
+  Power10: array[0..18] of Double = (
+    1E0, 1E1, 1E2, 1E3, 1E4, 1E5, 1E6, 1E7, 1E8, 1E9,
+    1E10, 1E11, 1E12, 1E13, 1E14, 1E15, 1E16, 1E17, 1E18
+  );
+
+  // XE7 broke string literal collapsing
+  sTrue = 'true';
+  sFalse = 'false';
+  sNull = 'null';
+  sQuoteChar = '"';
+
+type
+  PStrRec = ^TStrRec;
+  TStrRec = packed record
+    {$IFDEF CPUX64}
+    _Padding: LongInt;
+    {$ENDIF CPUX64}
+    CodePage: Word;
+    ElemSize: Word;
+    RefCnt: Longint;
+    Length: Longint;
+  end;
+
+  // TEncodingStrictAccess gives us access to the strict protected functions which are much easier
+  // to use with TJsonStringBuilder than converting FData to a dynamic TCharArray.
+  TEncodingStrictAccess = class(TEncoding)
+  public
+    function GetByteCountEx(Chars: PChar; CharCount: Integer): Integer; inline;
+    function GetBytesEx(Chars: PChar; CharCount: Integer; Bytes: PByte; ByteCount: Integer): Integer; inline;
+    function GetCharCountEx(Bytes: PByte; ByteCount: Integer): Integer; inline;
+    function GetCharsEx(Bytes: PByte; ByteCount: Integer; Chars: PChar; CharCount: Integer): Integer; inline;
+  end;
+
+  {$IFDEF USE_STRINGINTERN_FOR_NAMES}
+  TStringIntern = record
+  private type
+    PJsonStringEntry = ^TJsonStringEntry;
+    TJsonStringEntry = record
+      Next: Integer;
+      Hash: Integer;
+      Name: string;
+    end;
+
+    PJsonStringEntryArray = ^TJsonStringEntryArray;
+    TJsonStringEntryArray = array[0..MaxInt div SizeOf(TJsonStringEntry) - 1] of TJsonStringEntry;
+
+    PJsonIntegerArray = ^TJsonIntegerArray;
+    TJsonIntegerArray = array[0..MaxInt div SizeOf(Integer) - 1] of Integer;
+  private
+    FStrings: PJsonStringEntryArray;
+    FBuckets: PJsonIntegerArray;
+    FCapacity: Integer;
+    FCount: Integer;
+    class function GetHash(const Name: string): Integer; static;
+    procedure Grow;
+    function Find(Hash: Integer; const S: string): Integer;
+    procedure InternAdd(AHash: Integer; const S: string);
+  public
+    procedure Init;
+    procedure Done;
+    procedure Intern(var S: string; var PropName: string);
+  end;
+  {$ENDIF USE_STRINGINTERN_FOR_NAMES}
+
+  TStackStringBuffer = record
+  private
+    const MaxBuf = 256 - 1;
+  private
+    FBufPos: PChar;
+    FLen: Integer;
+    FDestStr: PString;
+    FBuf: array[0..MaxBuf] of Char;
+  public
+    procedure Init(ADestStr: PString);
+    procedure Done;
+
+    procedure AppendStr(Value: PChar; Len: Integer);
+    procedure AppendChar(Value: Char); inline;
+    procedure Append2Char(Value1, Value2: Char); inline;
+    //function IsEmpty: Boolean; inline;
+  end;
+
+  TJsonToken = record
+    Kind: TJsonTokenKind;
+    S: string; // jtkIdent/jtkString
+    case Integer of
+      0: (I: Integer; HI: Integer);
+      1: (L: Int64);
+      2: (F: Double);
+  end;
+
+  TJsonReader = class(TObject)
+  private
+    {$IFDEF USE_STRINGINTERN_FOR_NAMES}
+    FIdents: TStringIntern;
+    {$ENDIF USE_STRINGINTERN_FOR_NAMES}
+    FPropName: string;
+    procedure Accept(TokenKind: TJsonTokenKind);
+    procedure ParseObjectBody(const Data: TJsonObject);
+    procedure ParseObjectProperty(const Data: TJsonObject);
+    procedure ParseObjectPropertyValue(const Data: TJsonObject);
+    procedure ParseArrayBody(const Data: TJsonArray);
+    procedure ParseArrayPropertyValue(const Data: TJsonArray);
+    procedure AcceptFailed(TokenKind: TJsonTokenKind);
+  protected
+    FLook: TJsonToken;
+    function Next: Boolean; virtual; abstract;
+  public
+    {$IFDEF USE_FAST_NEWINSTANCE}
+    class function NewInstance: TObject {$IFDEF AUTOREFCOUNT} unsafe {$ENDIF}; override;
+    procedure FreeInstance; override;
+    {$ENDIF USE_FAST_NEWINSTANCE}
+
+    constructor Create;
+    destructor Destroy; override;
+    procedure Parse(Data: TJsonBaseObject);
+  end;
+
+  TUtf8JsonReader = class sealed(TJsonReader)
+  private
+    FText: PByte;
+    FTextEnd: PByte;
+  protected
+    function Next: Boolean; override; final;
+    // ARM optimization: Next() already has EndP in a local variable so don't use the slow indirect
+    // access to FTextEnd.
+    procedure LexString(P: PByte{$IFDEF CPUARM}; EndP: PByte{$ENDIF});
+    procedure LexNumber(P: PByte{$IFDEF CPUARM}; EndP: PByte{$ENDIF});
+    procedure LexIdent(P: PByte{$IFDEF CPUARM}; EndP: PByte{$ENDIF});
+  public
+    constructor Create(S: PByte; Len: Integer);
+  end;
+
+  TStringJsonReader = class sealed(TJsonReader)
+  private
+    FText: PChar;
+    FTextEnd: PChar;
+  protected
+    function Next: Boolean; override; final;
+    // ARM optimization: Next() already has EndP in a local variable so don't use the slow indirect
+    // access to FTextEnd.
+    procedure LexString(P: PChar{$IFDEF CPUARM}; EndP: PChar{$ENDIF});
+    procedure LexNumber(P: PChar{$IFDEF CPUARM}; EndP: PChar{$ENDIF});
+    procedure LexIdent(P: PChar{$IFDEF CPUARM}; EndP: PChar{$ENDIF});
+  public
+    constructor Create(const S: PChar; Len: Integer);
+  end;
+
+var
+  JSONFormatSettings: TFormatSettings;
+  {$IFDEF USE_NAME_STRING_LITERAL}
+  JsonMemInfoInitialized: Boolean = False;
+  JsonMemInfoBlockStart: PByte = nil;
+  JsonMemInfoBlockEnd: PByte = nil;
+  JsonMemInfoMainBlockStart: PByte = nil;
+  JsonMemInfoMainBlockEnd: PByte = nil;
+  {$ENDIF USE_NAME_STRING_LITERAL}
+
+{$IFDEF MSWINDOWS}
+function TzSpecificLocalTimeToSystemTime(lpTimeZoneInformation: PTimeZoneInformation;
+  var lpLocalTime, lpUniversalTime: TSystemTime): BOOL; stdcall;
+  external kernel32 name 'TzSpecificLocalTimeToSystemTime';
+{$ENDIF MSWINDOWS}
+
+{$IFDEF USE_NAME_STRING_LITERAL}
+procedure InitializeJsonMemInfo;
+var
+  MemInfo: TMemoryBasicInformation;
+begin
+  JsonMemInfoInitialized := True;
+  if VirtualQuery(PByte(HInstance + $1000), MemInfo, SizeOf(MemInfo)) = SizeOf(MemInfo) then
+  begin
+    JsonMemInfoBlockStart := MemInfo.AllocationBase;
+    JsonMemInfoBlockEnd := JsonMemInfoBlockStart + MemInfo.RegionSize;
+  end;
+  if HInstance <> MainInstance then
+  begin
+    if VirtualQuery(PByte(MainInstance + $1000), MemInfo, SizeOf(MemInfo)) = SizeOf(MemInfo) then
+    begin
+      JsonMemInfoMainBlockStart := MemInfo.AllocationBase;
+      JsonMemInfoMainBlockEnd := JsonMemInfoBlockStart + MemInfo.RegionSize;
+    end;
+  end;
+end;
+{$ENDIF USE_NAME_STRING_LITERAL}
+
+procedure ListError(Msg: PResStringRec; Data: Integer);
+begin
+  raise EStringListError.CreateFmt(LoadResString(Msg), [Data])
+        {$IFDEF HAS_RETURN_ADDRESS} at ReturnAddress{$ENDIF};
+end;
+
+procedure ErrorNoMappingForUnicodeCharacter;
+begin
+  {$IF not declared(SNoMappingForUnicodeCharacter)}
+  RaiseLastOSError;
+  {$ELSE}
+  raise EEncodingError.CreateRes(@SNoMappingForUnicodeCharacter)
+        {$IFDEF HAS_RETURN_ADDRESS} at ReturnAddress{$ENDIF};
+  {$IFEND}
+end;
+
+{$IFDEF USE_NAME_STRING_LITERAL}
+procedure AsgString(var Dest: string; const Source: string);
+begin
+  if (Pointer(Source) <> nil) and (PLongInt(@PByte(Source)[-8])^ = -1) and // string literal
+     ((PByte(Source) < JsonMemInfoBlockEnd) and (PByte(Source) >= JsonMemInfoBlockStart)) or
+     ((PByte(Source) < JsonMemInfoMainBlockEnd) and (PByte(Source) >= JsonMemInfoMainBlockStart)) then
+  begin
+    // Save memory by just using the string literal but only if it is in the EXE's or this DLL's
+    // code segment. Otherwise the memory could be released by a FreeLibrary call without us knowning.
+    Pointer(Dest) := Pointer(Source);
+  end
+  else
+    Dest := Source;
+end;
+{$ENDIF USE_NAME_STRING_LITERAL}
+
+{$IFDEF USE_FAST_STRASG_FOR_INTERNAL_STRINGS}
+  {$IFDEF DEBUG}
+//procedure InternAsgStringUsageError;
+//begin
+//  raise EJsonException.CreateRes(@RsInternAsgStringUsageError);
+//end;
+  {$ENDIF DEBUG}
+{$ENDIF USE_FAST_STRASG_FOR_INTERNAL_STRINGS}
+
+function GetHexDigitsUtf8(P: PByte; Count: Integer): LongWord;
+var
+  Ch: Byte;
+begin
+  Result := 0;
+  while Count > 0 do
+  begin
+    Ch := P^;
+    case P^ of
+      Ord('0')..Ord('9'): Result := (Result shl 4) or LongWord(Ch - Ord('0'));
+      Ord('A')..Ord('F'): Result := (Result shl 4) or LongWord(Ch - (Ord('A') - 10));
+      Ord('a')..Ord('f'): Result := (Result shl 4) or LongWord(Ch - (Ord('a') - 10));
+    else
+      Break;
+    end;
+    Inc(P);
+    Dec(Count);
+  end;
+  if Count > 0 then
+    raise EJsonParserException.CreateResFmt(@RsInvalidHexNumber, [P^]);
+end;
+
+function GetHexDigits(P: PChar; Count: Integer): LongWord;
+var
+  Ch: Char;
+begin
+  Result := 0;
+  while Count > 0 do
+  begin
+    Ch := P^;
+    case P^ of
+      '0'..'9': Result := (Result shl 4) or LongWord(Ord(Ch) - Ord('0'));
+      'A'..'F': Result := (Result shl 4) or LongWord(Ord(Ch) - (Ord('A') - 10));
+      'a'..'f': Result := (Result shl 4) or LongWord(Ord(Ch) - (Ord('a') - 10));
+    else
+      Break;
+    end;
+    Inc(P);
+    Dec(Count);
+  end;
+  if Count > 0 then
+    raise EJsonParserException.CreateResFmt(@RsInvalidHexNumber, [P^]);
+end;
+
+function UtcDateTimeToLocalDateTime(UtcDateTime: TDateTime): TDateTime;
+{$IFDEF MSWINDOWS}
+var
+  UtcTime, LocalTime: TSystemTime;
+begin
+  DateTimeToSystemTime(UtcDateTime, UtcTime);
+  if SystemTimeToTzSpecificLocalTime(nil, UtcTime, LocalTime) then
+    Result := SystemTimeToDateTime(LocalTime)
+  else
+    Result := UtcDateTime;
+end;
+{$ELSE}
+begin
+  Result := TTimeZone.Local.ToLocalTime(UtcDateTime);
+end;
+{$ENDIF MSWINDOWS}
+
+function DateTimeToISO8601(Value: TDateTime): string;
+{$IFDEF MSWINDOWS}
+var
+  LocalTime, UtcTime: TSystemTime;
+  Offset: TDateTime;
+  Hour, Min, Sec, MSec: Word;
+begin
+  DateTimeToSystemTime(Value, LocalTime);
+  Result := Format('%.4d-%.2d-%.2dT%.2d:%.2d:%.2d.%d',
+    [LocalTime.wYear, LocalTime.wMonth, LocalTime.wDay,
+     LocalTime.wHour, LocalTime.wMinute, LocalTime.wSecond, LocalTime.wMilliseconds]);
+  if TzSpecificLocalTimeToSystemTime(nil, LocalTime, UtcTime) then
+  begin
+    Offset := Value - SystemTimeToDateTime(UtcTime);
+    DecodeTime(Offset, Hour, Min, Sec, MSec);
+    if Offset < 0 then
+      Result := Format('%s-%.2d:%.2d', [Result, Hour, Min])
+    else if Offset > 0 then
+      Result := Format('%s+%.2d:%.2d', [Result, Hour, Min])
+    else
+      Result := Result + 'Z';
+  end;
+end;
+{$ELSE}
+var
+  Offset: TDateTime;
+  Year, Month, Day, Hour, Minute, Second, Milliseconds: Word;
+begin
+  DecodeDate(Value, Year, Month, Day);
+  DecodeTime(Value, Hour, Minute, Second, MilliSeconds);
+  Result := Format('%.4d-%.2d-%.2dT%.2d:%.2d:%.2d.%d', [Year, Month, Day, Hour, Minute, Second, Milliseconds]);
+  Offset := Value - TTimeZone.Local.ToUniversalTime(Value);
+  DecodeTime(Offset, Hour, Minute, Second, MilliSeconds);
+  if Offset < 0 then
+    Result := Format('%s-%.2d:%.2d', [Result, Hour, Minute])
+  else if Offset > 0 then
+    Result := Format('%s+%.2d:%.2d', [Result, Hour, Minute])
+  else
+    Result := Result + 'Z';
+end;
+{$ENDIF MSWINDOWS}
+
+class function TJsonBaseObject.DateTimeToJSON(const Value: TDateTime; UseUtcTime: Boolean): string;
+{$IFDEF MSWINDOWS}
+var
+  LocalTime, UtcTime: TSystemTime;
+begin
+  if UseUtcTime then
+  begin
+    DateTimeToSystemTime(Value, LocalTime);
+    if not TzSpecificLocalTimeToSystemTime(nil, LocalTime, UtcTime) then
+      UtcTime := LocalTime;
+    Result := Format('%.4d-%.2d-%.2dT%.2d:%.2d:%.2d.%dZ',
+      [UtcTime.wYear, UtcTime.wMonth, UtcTime.wDay,
+       UtcTime.wHour, UtcTime.wMinute, UtcTime.wSecond, UtcTime.wMilliseconds]);
+  end
+  else
+    Result := DateTimeToISO8601(Value);
+end;
+{$ELSE}
+var
+  UtcTime: TDateTime;
+  Year, Month, Day, Hour, Minute, Second, Milliseconds: Word;
+begin
+  if UseUtcTime then
+  begin
+    UtcTime := TTimeZone.Local.ToUniversalTime(Value);
+    DecodeDate(UtcTime, Year, Month, Day);
+    DecodeTime(UtcTime, Hour, Minute, Second, MilliSeconds);
+    Result := Format('%.4d-%.2d-%.2dT%.2d:%.2d:%.2d.%dZ', [Year, Month, Day, Hour, Minute, Second, Milliseconds]);
+  end
+  else
+    Result := DateTimeToISO8601(Value);
+end;
+{$ENDIF MSWINDOWS}
+
+function ParseDateTimePart(P: PChar; var Value: Integer; MaxLen: Integer): PChar;
+var
+  V: Integer;
+begin
+  Result := P;
+  V := 0;
+  while (Result^ in ['0'..'9']) and (MaxLen > 0) do
+  begin
+    V := V * 10 + (Ord(Result^) - Ord('0'));
+    Inc(Result);
+    Dec(MaxLen);
+  end;
+  Value := V;
+end;
+
+class function TJsonBaseObject.JSONToDateTime(const Value: string): TDateTime;
+var
+  P: PChar;
+  MSecsSince1970: Int64;
+  Year, Month, Day, Hour, Min, Sec, MSec: Integer;
+  OffsetHour, OffsetMin: Integer;
+  Sign: Double;
+begin
+  Result := 0;
+  if Value = '' then
+    Exit;
+
+  P := PChar(Value);
+  if (P^ = '/') and (StrLComp('Date(', P + 1, 5) = 0) then  // .NET: milliseconds since 1970-01-01
+  begin
+    Inc(P, 6);
+    MSecsSince1970 := 0;
+    while (P^ <> #0) and (P^ in ['0'..'9']) do
+    begin
+      MSecsSince1970 := MSecsSince1970 * 10 + (Ord(P^) - Ord('0'));
+      Inc(P);
+    end;
+    if (P^ = '+') or (P^ = '-') then // timezone information
+    begin
+      Inc(P);
+      while (P^ <> #0) and (P^ in ['0'..'9']) do
+        Inc(P);
+    end;
+    if (P[0] = ')') and (P[1] = '/') and (P[2] = #0) then
+      Result := UtcDateTimeToLocalDateTime(UnixDateDelta + (MSecsSince1970 / MSecsPerDay))
+    else
+      Result := 0; // invalid format
+  end
+  else
+  begin
+    // "2015-02-01T16:08:19.202Z"
+    if P^ = '-' then // negative year
+      Inc(P);
+    P := ParseDateTimePart(P, Year, 4);
+    if P^ <> '-' then
+      Exit; // invalid format
+    P := ParseDateTimePart(P + 1, Month, 2);
+    if P^ <> '-' then
+      Exit; // invalid format
+    P := ParseDateTimePart(P + 1, Day, 2);
+
+    Hour := 0;
+    Min := 0;
+    Sec := 0;
+    MSec := 0;
+    Result := EncodeDate(Year, Month, Day);
+
+    if P^ = 'T' then
+    begin
+      P := ParseDateTimePart(P + 1, Hour, 2);
+      if P^ <> ':' then
+        Exit; // invalid format
+      P := ParseDateTimePart(P + 1, Min, 2);
+      if P^ = ':' then
+      begin
+        P := ParseDateTimePart(P + 1, Sec, 2);
+        if P^ = '.' then
+          P := ParseDateTimePart(P + 1, MSec, 3);
+      end;
+      Result := Result + EncodeTime(Hour, Min, Sec, MSec);
+      if P^ <> 'Z' then
+      begin
+        if (P^ = '+') or (P^ = '-') then
+        begin
+          if P^ = '+' then
+            Sign := -1 //  +0100 means that the time is 1 hour later than UTC
+          else
+            Sign := 1;
+
+          P := ParseDateTimePart(P + 1, OffsetHour, 2);
+          if P^ = ':' then
+            Inc(P);
+          ParseDateTimePart(P, OffsetMin, 2);
+
+          Result := Result + (EncodeTime(OffsetHour, OffsetMin, 0, 0) * Sign);
+        end
+        else
+        begin
+          Result := 0; // invalid format
+          Exit;
+        end;
+      end;
+      Result := UtcDateTimeToLocalDateTime(Result);
+    end;
+  end;
+end;
+
+{$IFDEF NEXTGEN}
+function Utf8StrLen(P: PByte): Integer;
+begin
+  Result := 0;
+  if P <> nil then
+    while P[Result] <> 0 do
+      Inc(Result);
+end;
+{$ENDIF NEXTGEN}
+
+procedure SetStringUtf8(var S: string; P: PByte; Len: Integer);
+var
+  L: Integer;
+begin
+  if S <> '' then
+    S := '';
+  if (P = nil) or (Len = 0) then
+    Exit;
+  SetLength(S, Len);
+
+  L := Utf8ToUnicode(PWideChar(Pointer(S)), Len + 1, {$IFDEF NEXTGEN}Pointer(P){$ELSE}PAnsiChar(P){$ENDIF}, Len);
+  if L > 0 then
+  begin
+    if L - 1 <> Len then
+      SetLength(S, L - 1);
+  end
+  else
+    S := '';
+end;
+
+procedure AppendString(var S: string; P: PChar; Len: Integer);
+var
+  OldLen: Integer;
+begin
+  if (P = nil) or (Len = 0) then
+    Exit;
+  OldLen := Length(S);
+  SetLength(S, OldLen + Len);
+  Move(P^, PChar(Pointer(S))[OldLen], Len * SizeOf(Char));
+end;
+
+procedure AppendStringUtf8(var S: string; P: PByte; Len: Integer);
+var
+  L, OldLen: Integer;
+begin
+  if (P = nil) or (Len = 0) then
+    Exit;
+  OldLen := Length(S);
+  SetLength(S, OldLen + Len);
+
+  L := Utf8ToUnicode(PWideChar(Pointer(S)) + OldLen, Len + 1, {$IFDEF NEXTGEN}Pointer(P){$ELSE}PAnsiChar(P){$ENDIF}, Len);
+  if L > 0 then
+  begin
+    if L - 1 <> Len then
+      SetLength(S, OldLen + L - 1);
+  end
+  else
+    SetLength(S, OldLen);
+end;
+
+{ TJsonReader }
+
+{$IFDEF USE_FAST_NEWINSTANCE}
+class function TJsonReader.NewInstance: TObject;
+begin
+  GetMem(Pointer(Result), InstanceSize);
+  PPointer(Result)^ := Self;
+  {$IFDEF AUTOREFCOUNT}
+  TJsonReader(Result).FRefCount := 1;
+  {$ENDIF AUTOREFCOUNT}
+end;
+
+procedure TJsonReader.FreeInstance;
+begin
+  // We have no WeakRef => faster cleanup
+  FreeMem(Pointer(Self));
+end;
+{$ENDIF ~USE_FAST_NEWINSTANCE}
+
+constructor TJsonReader.Create;
+begin
+  //inherited Create;
+  {$IFDEF USE_FAST_NEWINSTANCE}
+  Pointer(FPropName) := nil;
+  Pointer(FLook.S) := nil;
+  {$ENDIF USE_FAST_NEWINSTANCE}
+  {$IFDEF USE_STRINGINTERN_FOR_NAMES}
+  FIdents.Init;
+  {$ENDIF USE_STRINGINTERN_FOR_NAMES}
+end;
+
+destructor TJsonReader.Destroy;
+begin
+  {$IFDEF USE_FAST_NEWINSTANCE}
+  FPropName := '';
+  FLook.S := '';
+  {$ENDIF USE_FAST_NEWINSTANCE}
+  {$IFDEF USE_STRINGINTERN_FOR_NAMES}
+  FIdents.Done;
+  {$ENDIF USE_STRINGINTERN_FOR_NAMES}
+  //inherited Destroy;
+end;
+
+procedure TJsonReader.Parse(Data: TJsonBaseObject);
+begin
+  if Data is TJsonObject then
+  begin
+    TJsonObject(Data).Clear;
+    Next; // initialize Lexer
+    {case FLook.Kind of
+      jtkLBracket:
+        begin
+          FPropName := '';
+          ParseObjectPropertyValue(TJsonObject(Data));
+        end
+    else}
+      Accept(jtkLBrace);
+      ParseObjectBody(TJsonObject(Data));
+      Accept(jtkRBrace);
+    //end;
+  end
+  else if Data is TJsonArray then
+  begin
+    TJsonArray(Data).Clear;
+    Next; // initialize Lexer
+    {case FLook.Kind of
+      jtkLBrace:
+        ParseArrayPropertyValue(TJsonArray(Data));
+    else}
+      Accept(jtkLBracket);
+      ParseArrayBody(TJsonArray(Data));
+      Accept(jtkRBracket)
+    //end;
+  end;
+end;
+
+procedure TJsonReader.ParseObjectBody(const Data: TJsonObject);
+// ObjectBody ::= [ ObjectProperty [ "," ObjectProperty ]* ]
+begin
+  if FLook.Kind <> jtkRBrace then
+  begin
+    while FLook.Kind <> jtkEof do
+    begin
+      ParseObjectProperty(Data);
+      if FLook.Kind = jtkRBrace then
+        Break;
+      Accept(jtkComma);
+    end;
+  end;
+end;
+
+procedure TJsonReader.ParseObjectProperty(const Data: TJsonObject);
+// Property ::= IDENT ":" ObjectPropertyValue
+begin
+  if FLook.Kind >= jtkIdent then // correct JSON would be "tkString" only
+  begin
+    {$IFDEF USE_STRINGINTERN_FOR_NAMES}
+    FIdents.Intern(FLook.S, FPropName);
+    {$ELSE}
+    FPropName := '';
+    // transfer the string without going through UStrAsg and UStrClr
+    Pointer(FPropName) := Pointer(FLook.S);
+    Pointer(FLook.S) := nil;
+    {$ENDIF USE_STRINGINTERN_FOR_NAMES}
+    Next;
+  end
+  else
+    Accept(jtkString);
+
+  Accept(jtkColon);
+  ParseObjectPropertyValue(Data);
+end;
+
+procedure TJsonReader.ParseObjectPropertyValue(const Data: TJsonObject);
+// ObjectPropertyValue ::= Object | Array | Value
+begin
+  case FLook.Kind of
+    jtkLBrace:
+      begin
+        Accept(jtkLBrace);
+        ParseObjectBody(Data.InternAddObject(FPropName));
+        Accept(jtkRBrace);
+      end;
+
+    jtkLBracket:
+      begin
+        Accept(jtkLBracket);
+        ParseArrayBody(Data.InternAddArray(FPropName));
+        Accept(jtkRBracket);
+      end;
+
+    jtkNull:
+      begin
+        Data.InternAdd(FPropName, TJsonObject(nil));
+        Next;
+      end;
+
+    jtkIdent,
+    jtkString:
+      begin
+        Data.InternAddItem(FPropName).InternSetValueTransfer(FLook.S);
+        Next;
+      end;
+
+    jtkInt:
+      begin
+        // find the best match
+        if FLook.HI = 0 then
+          Data.InternAdd(FPropName, FLook.I)
+        else
+          Data.InternAdd(FPropName, FLook.L);
+        Next;
+      end;
+
+    jtkFloat:
+      begin
+        Data.InternAdd(FPropName, FLook.F);
+        Next;
+      end;
+
+    jtkTrue:
+      begin
+        Data.InternAdd(FPropName, True);
+        Next;
+      end;
+
+    jtkFalse:
+      begin
+        Data.InternAdd(FPropName, False);
+        Next;
+      end
+  else
+    Accept(jtkValue);
+  end;
+end;
+
+procedure TJsonReader.ParseArrayBody(const Data: TJsonArray);
+// ArrayBody ::= [ ArrayPropertyValue [ "," ArrayPropertyValue ]* ]
+begin
+  if FLook.Kind <> jtkRBracket then
+  begin
+    while FLook.Kind <> jtkEof do
+    begin
+      ParseArrayPropertyValue(Data);
+      if FLook.Kind = jtkRBracket then
+        Break;
+      Accept(jtkComma);
+    end;
+  end;
+end;
+
+procedure TJsonReader.ParseArrayPropertyValue(const Data: TJsonArray);
+// ArrayPropertyValue ::= Object | Array | Value
+begin
+  case FLook.Kind of
+    jtkLBrace:
+      begin
+        Accept(jtkLBrace);
+        ParseObjectBody(Data.AddObject);
+        Accept(jtkRBrace);
+      end;
+
+    jtkLBracket:
+      begin
+        Accept(jtkLBracket);
+        ParseArrayBody(Data.AddArray);
+        Accept(jtkRBracket);
+      end;
+
+    jtkNull:
+      begin
+        Data.Add(TJsonObject(nil));
+        Next;
+      end;
+
+    jtkIdent,
+    jtkString:
+      begin
+        Data.Add(FLook.S);
+        Next;
+      end;
+
+    jtkInt:
+      begin
+        // find the best match
+        if FLook.HI = 0 then
+          Data.Add(FLook.I)
+        else
+          Data.Add(FLook.L);
+        Next;
+      end;
+
+    jtkFloat:
+      begin
+        Data.Add(FLook.F);
+        Next;
+      end;
+
+    jtkTrue:
+      begin
+        Data.Add(True);
+        Next;
+      end;
+
+    jtkFalse:
+      begin
+        Data.Add(False);
+        Next;
+      end;
+  else
+    Accept(jtkValue);
+  end;
+end;
+
+procedure TJsonReader.AcceptFailed(TokenKind: TJsonTokenKind);
+begin
+  if FLook.Kind = jtkEof then
+    raise EJsonParserException.CreateResFmt(@RsUnexpectedEndOfFile, [JsonTokenKindToStr[TokenKind]]);
+  raise EJsonParserException.CreateResFmt(@RsUnexpectedToken, [JsonTokenKindToStr[TokenKind], JsonTokenKindToStr[FLook.Kind]]);
+end;
+
+procedure TJsonReader.Accept(TokenKind: TJsonTokenKind);
+begin
+  if FLook.Kind <> TokenKind then
+    AcceptFailed(TokenKind);
+  Next;
+end;
+
+{ TJsonDataValue }
+
+procedure TJsonDataValue.Clear;
+{$IFDEF USE_FAST_AUTOREFCOUNT}
+var
+  P: Pointer;
+{$ENDIF USE_FAST_AUTOREFCOUNT}
+begin
+  // All types must clear their value because if a value changes the type we need a zero-ed value
+  case FTyp of
+    jdtString:
+      string(FValue.S) := '';
+    jdtInt:
+      FValue.I := 0;
+    jdtLong:
+      FValue.L := 0;
+    jdtFloat:
+      FValue.F := 0;
+    jdtBool:
+      FValue.B := False;
+    jdtArray,
+    jdtObject:
+      begin
+        {$IFDEF USE_FAST_AUTOREFCOUNT}
+        P := FValue.O;
+        if P <> nil then
+        begin
+          FValue.O := nil;
+          TJsonBaseObject(P).ARCObjRelease;
+        end;
+        {$ELSE}
+          {$IFNDEF AUTOREFCOUNT}
+        TJsonBaseObject(FValue.O).Free;
+          {$ENDIF ~AUTOREFCOUNT}
+        TJsonBaseObject(FValue.O) := nil;
+        {$ENDIF USE_FAST_AUTOREFCOUNT}
+      end;
+  end;
+  FTyp := jdtNone;
+end;
+
+function TJsonDataValue.GetArrayValue: TJsonArray;
+begin
+  if FTyp = jdtArray then
+    Result := TJsonArray(FValue.A)
+  else if FTyp = jdtNone then
+    Result := nil
+  else
+  begin
+    TypeCastError(jdtArray);
+    Result := nil;
+  end;
+end;
+
+procedure TJsonDataValue.SetArrayValue(const AValue: TJsonArray);
+var
+  LTyp: TJsonDataType;
+begin
+  LTyp := FTyp;
+  if (LTyp <> jdtArray) or (AValue <> FValue.A) then
+  begin
+    if LTyp <> jdtNone then
+      Clear;
+    FTyp := jdtArray;
+    {$IFDEF USE_FAST_AUTOREFCOUNT}
+    // Assert(FValue.A = nil);
+    if AValue <> nil then
+      AValue.ARCObjAddRef;
+    FValue.A := Pointer(AValue);
+    {$ELSE}
+    TJsonArray(FValue.A) := AValue;
+    {$ENDIF USE_FAST_AUTOREFCOUNT}
+  end;
+end;
+
+function TJsonDataValue.GetObjectValue: TJsonObject;
+begin
+  if FTyp = jdtObject then
+    Result := TJsonObject(FValue.O)
+  else if FTyp = jdtNone then
+    Result := nil
+  else
+  begin
+    TypeCastError(jdtObject);
+    Result := nil;
+  end;
+end;
+
+procedure TJsonDataValue.SetObjectValue(const AValue: TJsonObject);
+var
+  LTyp: TJsonDataType;
+begin
+  LTyp := FTyp;
+  if (LTyp <> jdtObject) or (AValue <> FValue.O) then
+  begin
+    if LTyp <> jdtNone then
+      Clear;
+    FTyp := jdtObject;
+    {$IFDEF USE_FAST_AUTOREFCOUNT}
+    // Assert(FValue.O = nil);
+    if AValue <> nil then
+      AValue.ARCObjAddRef;
+    FValue.O := Pointer(AValue);
+    {$ELSE}
+    TJsonObject(FValue.O) := AValue;
+    {$ENDIF USE_FAST_AUTOREFCOUNT}
+  end;
+end;
+
+procedure TJsonDataValue.InternSetArrayValue(const AValue: TJsonArray);
+begin
+  FTyp := jdtArray;
+  {$IFDEF USE_FAST_AUTOREFCOUNT}
+  // Assert(FValue.A = nil);
+  if AValue <> nil then
+    Inc(AValue.FRefCount); // AValue.ARCObjAddRef;   no other thread knows about this object right now
+  FValue.A := Pointer(AValue);
+  {$ELSE}
+  TJsonArray(FValue.A) := AValue;
+  {$ENDIF USE_FAST_AUTOREFCOUNT}
+end;
+
+procedure TJsonDataValue.InternSetObjectValue(const AValue: TJsonObject);
+begin
+  FTyp := jdtObject;
+  {$IFDEF USE_FAST_AUTOREFCOUNT}
+  // Assert(FValue.O = nil);
+  if AValue <> nil then
+    Inc(AValue.FRefCount); // AValue.ARCObjAddRef;   no other thread knows about this object right now
+  FValue.O := Pointer(AValue);
+  {$ELSE}
+  TJsonObject(FValue.O) := AValue;
+  {$ENDIF USE_FAST_AUTOREFCOUNT}
+end;
+
+function TJsonDataValue.GetValue: string;
+begin
+  case FTyp of
+    jdtNone:
+      Result := '';
+    jdtString:
+      Result := string(FValue.S);
+    jdtInt:
+      Result := IntToStr(FValue.I);
+    jdtLong:
+      Result := IntToStr(FValue.L);
+    jdtFloat:
+      Result := FloatToStr(FValue.F, JSONFormatSettings);
+    jdtBool:
+      if FValue.B then
+        Result := sTrue
+      else
+        Result := sFalse;
+  else
+    TypeCastError(jdtString);
+    Result := '';
+  end;
+end;
+
+procedure TJsonDataValue.SetValue(const AValue: string);
+var
+  LTyp: TJsonDataType;
+begin
+  LTyp := FTyp;
+  if (LTyp <> jdtString) or (AValue <> string(FValue.S)) then
+  begin
+    if LTyp <> jdtNone then
+      Clear;
+    FTyp := jdtString;
+    string(FValue.S) := AValue;
+  end;
+end;
+
+procedure TJsonDataValue.InternSetValue(const AValue: string);
+begin
+  FTyp := jdtString;
+  string(FValue.S) := AValue;
+end;
+
+procedure TJsonDataValue.InternSetValueTransfer(var AValue: string);
+begin
+  FTyp := jdtString;
+  // transfer the string without going through UStrAsg and UStrClr
+  FValue.S := Pointer(AValue);
+  Pointer(AValue) := nil;
+end;
+
+function TJsonDataValue.GetIntValue: Integer;
+begin
+  case FTyp of
+    jdtNone:
+      Result := 0;
+    jdtString:
+      if not TryStrToInt(string(FValue.S), Result) then
+        Result := Trunc(StrToFloat(string(FValue.S), JSONFormatSettings));
+    jdtInt:
+      Result := FValue.I;
+    jdtLong:
+      Result := FValue.L;
+    jdtFloat:
+      Result := Trunc(FValue.F);
+    jdtBool:
+      Result := Ord(FValue.B);
+  else
+    TypeCastError(jdtInt);
+    Result := 0;
+  end;
+end;
+
+procedure TJsonDataValue.SetIntValue(const AValue: Integer);
+var
+  LTyp: TJsonDataType;
+begin
+  LTyp := FTyp;
+  if (LTyp <> jdtInt) or (AValue <> FValue.I) then
+  begin
+    if LTyp <> jdtNone then
+      Clear;
+    FTyp := jdtInt;
+    FValue.I := AValue;
+  end;
+end;
+
+function TJsonDataValue.GetLongValue: Int64;
+begin
+  case FTyp of
+    jdtNone:
+      Result := 0;
+    jdtString:
+      if not TryStrToInt64(string(FValue.S), Result) then
+        Result := Trunc(StrToFloat(string(FValue.S), JSONFormatSettings));
+    jdtInt:
+      Result := FValue.I;
+    jdtLong:
+      Result := FValue.L;
+    jdtFloat:
+      Result := Trunc(FValue.F);
+    jdtBool:
+      Result := Ord(FValue.B);
+  else
+    TypeCastError(jdtLong);
+    Result := 0;
+  end;
+end;
+
+procedure TJsonDataValue.SetLongValue(const AValue: Int64);
+var
+  LTyp: TJsonDataType;
+begin
+  LTyp := FTyp;
+  if (LTyp <> jdtLong) or (AValue <> FValue.L) then
+  begin
+    if LTyp <> jdtNone then
+      Clear;
+    FTyp := jdtLong;
+    FValue.L := AValue;
+  end;
+end;
+
+function TJsonDataValue.GetFloatValue: Double;
+begin
+  case FTyp of
+    jdtNone:
+      Result := 0;
+    jdtString:
+      Result := StrToFloat(string(FValue.S), JSONFormatSettings);
+    jdtInt:
+      Result := FValue.I;
+    jdtLong:
+      Result := FValue.L;
+    jdtFloat:
+      Result := FValue.F;
+    jdtBool:
+      Result := Ord(FValue.B);
+  else
+    TypeCastError(jdtFloat);
+    Result := 0;
+  end;
+end;
+
+procedure TJsonDataValue.SetFloatValue(const AValue: Double);
+var
+  LTyp: TJsonDataType;
+begin
+  LTyp := FTyp;
+  if (LTyp <> jdtFloat) or (AValue <> FValue.F) then
+  begin
+    if LTyp <> jdtNone then
+      Clear;
+    FTyp := jdtFloat;
+    FValue.F := AValue;
+  end;
+end;
+
+function TJsonDataValue.GetBoolValue: Boolean;
+begin
+  case FTyp of
+    jdtNone:
+      Result := False;
+    jdtString:
+      Result := string(FValue.S) = 'true';
+    jdtInt:
+      Result := FValue.I <> 0;
+    jdtLong:
+      Result := FValue.L <> 0;
+    jdtFloat:
+      Result := FValue.F <> 0;
+    jdtBool:
+      Result := FValue.B;
+  else
+    TypeCastError(jdtBool);
+    Result := False;
+  end;
+end;
+
+procedure TJsonDataValue.SetBoolValue(const AValue: Boolean);
+var
+  LTyp: TJsonDataType;
+begin
+  LTyp := FTyp;
+  if (LTyp <> jdtBool) or (AValue <> FValue.B) then
+  begin
+    if LTyp <> jdtNone then
+      Clear;
+    FTyp := jdtBool;
+    FValue.B := AValue;
+  end;
+end;
+
+procedure TJsonDataValue.InternToJSON(var Writer: TJsonOutputWriter);
+var
+  S: string; // don't let the compiler create temporary strings itself as this will slow down the "end;"
+begin
+  case FTyp of
+    jdtNone:
+      Writer.AppendValue(sNull);
+    jdtString:
+      TJsonBaseObject.StrToJSONStr(Writer.AppendStrValue, string(FValue.S));
+    jdtInt:
+      begin
+        S := IntToStr(FValue.I);
+        Writer.AppendValue(S);
+      end;
+    jdtLong:
+      begin
+        S := IntToStr(FValue.L);
+        Writer.AppendValue(S);
+      end;
+    jdtFloat:
+      begin
+        S := FloatToStr(FValue.F, JSONFormatSettings);
+        Writer.AppendValue(S);
+      end;
+    jdtBool:
+      if FValue.B then
+        Writer.AppendValue(sTrue)
+      else
+        Writer.AppendValue(sFalse);
+    jdtArray:
+      if (FValue.A = nil) or (TJsonArray(FValue.A).Count = 0) then
+        Writer.AppendValue('[]')
+      else
+        TJsonArray(FValue.A).InternToJSON(Writer);
+    jdtObject:
+      if FValue.O = nil then
+        Writer.AppendValue(sNull)
+      else
+        TJsonObject(FValue.O).InternToJSON(Writer);
+  end;
+end;
+
+{ TJsonBaseObject }
+
+{$IFDEF USE_FAST_NEWINSTANCE}
+class function TJsonBaseObject.NewInstance: TObject;
+begin
+  Result := AllocMem(InstanceSize); // zeroes the new memory
+  PPointer(Result)^ := Self; // VMT
+  {$IFDEF AUTOREFCOUNT}
+  TJsonBaseObject(Result).FRefCount := 1;
+  {$ENDIF AUTOREFCOUNT}
+end;
+{$ENDIF ~USE_FAST_NEWINSTANCE}
+
+{$IFDEF USE_FAST_AUTOREFCOUNT}
+function TJsonBaseObject.ARCObjRelease: Integer;
+begin
+  // Use a static call instead of the virtual method call
+  Result := inherited __ObjRelease;
+end;
+
+function TJsonBaseObject.ARCObjAddRef: Integer;
+begin
+  // Inline __ObjAddRef to skip the virtual method call
+  Result := AtomicIncrement(FRefCount);
+  //Result := inherited __ObjAddRef;
+end;
+{$ENDIF USE_FAST_AUTOREFCOUNT}
+
+class procedure TJsonBaseObject.StrToJSONStr(const AppendMethod: TWriterAppendMethod; const S: string);
+var
+  P, EndP, F: PChar;
+begin
+  P := PChar(Pointer(S));
+  if P <> nil then
+  begin
+    //EndP := P + Length(S);  inlined Length introduces too much unnecessary code
+    EndP := P + PLongInt(@PByte(S)[-4])^;
+
+    // find the first char that must be escaped
+    F := P;
+    while (P < EndP) and not (P^ in [#0..#31, '\', '"' {$IFDEF ESCAPE_SLASH_AFTER_LESSTHAN}, '/'{$ENDIF}]) do
+      Inc(P);
+
+    // nothing found, than it is easy
+    if P = EndP then
+      AppendMethod(S)
+    else
+      EscapeStrToJSONStr(F, P, EndP, AppendMethod);
+  end;
+end;
+
+class procedure TJsonBaseObject.EscapeStrToJSONStr(F, P, EndP: PChar; const AppendMethod: TWriterAppendMethod);
+const
+  HexChars: array[0..15] of Char = '0123456789abcdef';
+var
+  Buf: TStackStringBuffer;
+  Ch: Char;
+  RetValue: string;
+  {$IFDEF ESCAPE_SLASH_AFTER_LESSTHAN}
+  StartP: PChar;
+  {$ENDIF ESCAPE_SLASH_AFTER_LESSTHAN}
+begin
+  {$IFDEF ESCAPE_SLASH_AFTER_LESSTHAN}
+  StartP := F;
+  {$ENDIF ESCAPE_SLASH_AFTER_LESSTHAN}
+
+  //RetValue := '';
+  Buf.Init(@RetValue);
+  repeat
+    if P <> F then
+      Buf.AppendStr(F, P - F); // append the string part that doesn't need an escape sequence
+    if P < EndP then
+    begin
+      Ch := P^;
+      case Ch of
+        #0..#7, #11, #14..#31:
+          begin
+            Buf.AppendStr('\u00', 4);
+            Buf.Append2Char(HexChars[Word(Ch) shr 4], HexChars[Word(Ch) and $F]);
+          end;
+        #8: Buf.Append2Char('\', 'b');
+        #9: Buf.Append2Char('\', 't');
+        #10: Buf.Append2Char('\', 'n');
+        #12: Buf.Append2Char('\', 'f');
+        #13: Buf.Append2Char('\', 'r');
+        '\': Buf.Append2Char('\', '\');
+        '"': Buf.Append2Char('\', '"');
+        {$IFDEF ESCAPE_SLASH_AFTER_LESSTHAN}
+        '/':
+          begin
+            if (P > StartP) and (P[-1] = '<') then // escape '/' only if we have '</' to support HTML <script>-Tag
+              Buf.Append2Char('\', '/')
+            else
+              Buf.AppendChar('/');
+          end;
+        {$ENDIF ESCAPE_SLASH_AFTER_LESSTHAN}
+      end;
+      Inc(P);
+      F := P;
+      while (P < EndP) and not (P^ in [#0..#31, '\', '"' {$IFDEF ESCAPE_SLASH_AFTER_LESSTHAN}, '/'{$ENDIF}]) do
+        Inc(P);
+    end
+    else
+      Break;
+  until False;
+  Buf.Done; // transfers the buffer to "Result"
+  AppendMethod(RetValue);
+end;
+
+class procedure TJsonBaseObject.JSONStrToStr(P, EndP: PChar; FirstEscapeIndex: Integer; var S: string);
+const
+  MaxBufPos = 127;
+var
+  Buf: array[0..MaxBufPos] of Char;
+  F: PChar;
+  BufPos, Len: Integer;
+begin
+  Dec(FirstEscapeIndex);
+
+  if FirstEscapeIndex > 0 then
+  begin
+    SetString(S, P, FirstEscapeIndex);
+    Inc(P, FirstEscapeIndex);
+  end
+  else
+    S := '';
+
+  while True do
+  begin
+    BufPos := 0;
+    while (P < EndP) and (P^ = '\') do
+    begin
+      Inc(P);
+      if P = EndP then // broken escaped character
+        Break;
+      case P^ of
+        '"': Buf[BufPos] := '"';
+        '\': Buf[BufPos] := '\';
+        '/': Buf[BufPos] := '/';
+        'b': Buf[BufPos] := #8;
+        'f': Buf[BufPos] := #12;
+        'n': Buf[BufPos] := #10;
+        'r': Buf[BufPos] := #13;
+        't': Buf[BufPos] := #9;
+        'u':
+          begin
+            Inc(P);
+            if P + 3 >= EndP then
+              Break;
+            Buf[BufPos] := Char(GetHexDigits(P, 4));
+            Inc(P, 3);
+          end;
+      else
+        Break;
+      end;
+      Inc(P);
+
+      Inc(BufPos);
+      if BufPos > MaxBufPos then
+      begin
+        Len := Length(S);
+        SetLength(S, Len + BufPos);
+        Move(Buf[0], PChar(Pointer(S))[Len], BufPos * SizeOf(Char));
+        BufPos := 0;
+      end;
+    end;
+    // append remaining buffer
+    if BufPos > 0 then
+    begin
+      Len := Length(S);
+      SetLength(S, Len + BufPos);
+      Move(Buf[0], PChar(Pointer(S))[Len], BufPos * SizeOf(Char));
+    end;
+
+    // fast forward
+    F := P;
+    while (P < EndP) and (P^ <> '\') do
+      Inc(P);
+    if P > F then
+      AppendString(S, F, P - F);
+    if P >= EndP then
+      Break;
+  end;
+end;
+
+class procedure TJsonBaseObject.JSONUtf8StrToStr(P, EndP: PByte; FirstEscapeIndex: Integer; var S: string);
+const
+  MaxBufPos = 127;
+var
+  Buf: array[0..MaxBufPos] of Char;
+  F: PByte;
+  BufPos, Len: Integer;
+begin
+  Dec(FirstEscapeIndex);
+
+  if FirstEscapeIndex > 0 then
+  begin
+    SetStringUtf8(S, P, FirstEscapeIndex);
+    Inc(P, FirstEscapeIndex);
+  end
+  else
+    S := '';
+
+  while True do
+  begin
+    BufPos := 0;
+    while (P < EndP) and (P^ = Byte(Ord('\'))) do
+    begin
+      Inc(P);
+      if P = EndP then // broken escaped character
+        Break;
+      case P^ of
+        Ord('"'): Buf[BufPos] := '"';
+        Ord('\'): Buf[BufPos] := '\';
+        Ord('/'): Buf[BufPos] := '/';
+        Ord('b'): Buf[BufPos] := #8;
+        Ord('f'): Buf[BufPos] := #12;
+        Ord('n'): Buf[BufPos] := #10;
+        Ord('r'): Buf[BufPos] := #13;
+        Ord('t'): Buf[BufPos] := #9;
+        Ord('u'):
+          begin
+            Inc(P);
+            if P + 3 >= EndP then
+              Break;
+            Buf[BufPos] := Char(GetHexDigitsUtf8(P, 4));
+            Inc(P, 3);
+          end;
+      else
+        Break;
+      end;
+      Inc(P);
+
+      Inc(BufPos);
+      if BufPos > MaxBufPos then
+      begin
+        Len := Length(S);
+        SetLength(S, Len + BufPos);
+        Move(Buf[0], PChar(Pointer(S))[Len], BufPos * SizeOf(Char));
+        BufPos := 0;
+      end;
+    end;
+    // append remaining buffer
+    if BufPos > 0 then
+    begin
+      Len := Length(S);
+      SetLength(S, Len + BufPos);
+      Move(Buf[0], PChar(Pointer(S))[Len], BufPos * SizeOf(Char));
+    end;
+
+    // fast forward
+    F := P;
+    while (P < EndP) and (P^ <> Byte(Ord('\'))) do
+      Inc(P);
+    if P > F then
+      AppendStringUtf8(S, F, P - F);
+    if P >= EndP then
+      Break;
+  end;
+end;
+
+{$IFNDEF NEXTGEN}
+class function TJsonBaseObject.ParseUtf8(const S: UTF8String): TJsonBaseObject;
+begin
+  Result := ParseUtf8Bytes(PByte(S), Length(S));
+end;
+
+class function TJsonBaseObject.ParseUtf8(S: PAnsiChar; Len: Integer): TJsonBaseObject;
+begin
+  Result := ParseUtf8Bytes(PByte(S), Len);
+end;
+{$ENDIF ~NEXTGEN}
+
+class function TJsonBaseObject.ParseUtf8Bytes(S: PByte; Len: Integer): TJsonBaseObject;
+begin
+  if (S = nil) or (Len = 0) then
+    Result := nil
+  else
+  begin
+    if Len < 0 then
+    begin
+      {$IFDEF NEXTGEN}
+      Len := Utf8StrLen(S);
+      {$ELSE}
+      Len := StrLen(PAnsiChar(S));
+      {$ENDIF ~NEXTGEN}
+    end;
+    while (Len > 0) and (S^ <= 32) do
+    begin
+      Inc(S);
+      Dec(Len);
+    end;
+    if Len = 0 then
+      Result := nil
+    else
+    begin
+      if (Len > 0) and (S^ = Byte(Ord('['))) then
+        Result := TJsonArray.Create
+      else
+        Result := TJsonObject.Create;
+
+      {$IFDEF AUTOREFCOUNT}
+      Result.FromUtf8JSON(S, Len);
+      {$ELSE}
+      try
+        Result.FromUtf8JSON(S, Len);
+      except
+        Result.Free;
+        raise;
+      end;
+      {$ENDIF AUTOREFCOUNT}
+    end;
+  end;
+end;
+
+class function TJsonBaseObject.Parse(const S: UnicodeString): TJsonBaseObject;
+begin
+  Result := Parse(PWideChar(Pointer(S)), Length(S));
+end;
+
+class function TJsonBaseObject.Parse(S: PWideChar; Len: Integer): TJsonBaseObject;
+begin
+  if (S = nil) or (Len = 0) then
+    Result := nil
+  else
+  begin
+    if Len < 0 then
+      Len := StrLen(S);
+    while (Len > 0) and (S^ <= #32) do
+    begin
+      Inc(S);
+      Dec(Len);
+    end;
+    if Len = 0 then
+      Result := nil
+    else
+    begin
+      if (Len > 0) and (S^ = '[') then
+        Result := TJsonArray.Create
+      else
+        Result := TJsonObject.Create;
+
+      {$IFDEF AUTOREFCOUNT}
+      Result.FromJSON(S, Len);
+      {$ELSE}
+      try
+        Result.FromJSON(S, Len);
+      except
+        Result.Free;
+        raise;
+      end;
+      {$ENDIF AUTOREFCOUNT}
+    end;
+  end;
+end;
+
+class function TJsonBaseObject.Parse(const Bytes: TBytes; Encoding: TEncoding; ByteIndex: Integer;
+  ByteCount: Integer): TJsonBaseObject;
+var
+  L: Integer;
+begin
+  L := Length(Bytes);
+  if ByteCount = -1 then
+    ByteCount := L - ByteIndex;
+  if (ByteCount <= 0) or (ByteIndex + ByteCount > L) then
+    Result := nil
+  else
+  begin
+    if (Encoding = TEncoding.UTF8) or (Encoding = nil) then
+      Result := ParseUtf8Bytes(PByte(@Bytes[ByteIndex]), ByteCount)
+    else if Encoding = TEncoding.Unicode then
+      Result := Parse(PWideChar(@Bytes[ByteIndex]), ByteCount div SizeOf(WideChar))
+    else
+      Result := Parse(Encoding.GetString(Bytes, ByteIndex, ByteCount));
+  end;
+end;
+
+class function TJsonBaseObject.ParseFromFile(const FileName: string; Utf8WithoutBOM: Boolean): TJsonBaseObject;
+var
+  Stream: TFileStream;
+begin
+  Stream := TFileStream.Create(FileName, fmOpenRead or fmShareDenyWrite);
+  try
+    Result := ParseFromStream(Stream, nil, Utf8WithoutBOM);
+  finally
+    Stream.Free;
+  end;
+end;
+
+class function TJsonBaseObject.ParseFromStream(Stream: TStream; Encoding: TEncoding; Utf8WithoutBOM: Boolean): TJsonBaseObject;
+var
+  StreamInfo: TStreamInfo;
+  S: string;
+  L: Integer;
+begin
+  GetStreamBytes(Stream, Encoding, Utf8WithoutBOM, StreamInfo);
+  try
+    if Encoding = TEncoding.UTF8 then
+      Result := ParseUtf8Bytes(StreamInfo.Buffer, StreamInfo.Size)
+    else if Encoding = TEncoding.Unicode then
+      Result := Parse(PWideChar(Pointer(StreamInfo.Buffer)), StreamInfo.Size div SizeOf(WideChar))
+    else
+    begin
+      L := TEncodingStrictAccess(Encoding).GetCharCountEx(StreamInfo.Buffer, StreamInfo.Size);
+      SetLength(S, L);
+      if L > 0 then
+        TEncodingStrictAccess(Encoding).GetCharsEx(StreamInfo.Buffer, StreamInfo.Size, PChar(Pointer(S)), L)
+      else if StreamInfo.Size > 0 then
+        ErrorNoMappingForUnicodeCharacter;
+
+      // release memory
+      FreeMem(StreamInfo.AllocationBase);
+      StreamInfo.AllocationBase := nil;
+
+      Result := Parse(S);
+    end;
+  finally
+    FreeMem(StreamInfo.AllocationBase);
+  end;
+end;
+
+{$IFNDEF NEXTGEN}
+procedure TJsonBaseObject.FromUtf8JSON(const S: UTF8String);
+begin
+  FromUtf8JSON(PAnsiChar(Pointer(S)), Length(S));
+end;
+
+procedure TJsonBaseObject.FromUtf8JSON(S: PAnsiChar; Len: Integer);
+begin
+  FromUtf8JSON(PByte(S), Len);
+end;
+{$ENDIF ~NEXTGEN}
+
+procedure TJsonBaseObject.FromUtf8JSON(S: PByte; Len: Integer);
+var
+  Reader: TJsonReader;
+begin
+  if Len < 0 then
+  begin
+    {$IFDEF NEXTGEN}
+    Len := Utf8StrLen(S);
+    {$ELSE}
+    Len := StrLen(PAnsiChar(S));
+    {$ENDIF ~NEXTGEN}
+  end;
+  Reader := TUtf8JsonReader.Create(S, Len);
+  try
+    Reader.Parse(Self);
+  finally
+    Reader.Free;
+  end;
+end;
+
+procedure TJsonBaseObject.FromJSON(const S: UnicodeString);
+begin
+  FromJSON(PWideChar(S), Length(S));
+end;
+
+procedure TJsonBaseObject.FromJSON(S: PWideChar; Len: Integer = -1);
+var
+  Reader: TJsonReader;
+begin
+  if Len < 0 then
+    Len := StrLen(S);
+  Reader := TStringJsonReader.Create(S, Len);
+  try
+    Reader.Parse(Self);
+  finally
+    Reader.Free;
+  end;
+end;
+
+procedure TJsonBaseObject.LoadFromFile(const FileName: string; Utf8WithoutBOM: Boolean);
+var
+  Stream: TFileStream;
+begin
+  Stream := TFileStream.Create(FileName, fmOpenRead or fmShareDenyWrite);
+  try
+    LoadFromStream(Stream, nil, Utf8WithoutBOM);
+  finally
+    Stream.Free;
+  end;
+end;
+
+class procedure TJsonBaseObject.GetStreamBytes(Stream: TStream; var Encoding: TEncoding; Utf8WithoutBOM: Boolean;
+  var StreamInfo: TStreamInfo);
+{$IFDEF WORKAROUND_NETWORK_FILE_INSUFFICIENT_RESOURCES}
+const
+  MaxBufSize = 20 * 1024 * 1024;
+var
+  ReadCount, ReadBufSize: NativeInt;
+{$ENDIF WORKAROUND_NETWORK_FILE_INSUFFICIENT_RESOURCES}
+var
+  Position: Int64;
+  Size: NativeInt;
+  Bytes: PByte;
+  BufStart: Integer;
+begin
+  BufStart := 0;
+  Position := Stream.Position;
+  Size := Stream.Size - Position;
+
+  StreamInfo.Buffer := nil;
+  StreamInfo.Size := 0;
+  StreamInfo.AllocationBase := nil;
+  try
+    Bytes := nil;
+    if Size > 0 then
+    begin
+      if Stream is TCustomMemoryStream then
+      begin
+        Bytes := TCustomMemoryStream(Stream).Memory;
+        TCustomMemoryStream(Stream).Position := Position + Size;
+        Inc(Bytes, Position);
+      end
+      else
+      begin
+        GetMem(StreamInfo.AllocationBase, Size);
+        Bytes := StreamInfo.AllocationBase;
+        {$IFDEF WORKAROUND_NETWORK_FILE_INSUFFICIENT_RESOURCES}
+        if (Stream is THandleStream) and (Size > MaxBufSize) then
+        begin
+          ReadCount := Size;
+          // Read in 20 MB blocks to work around a network limitation in Windows 2003 and older (INSUFFICIENT RESOURCES)
+          while ReadCount > 0 do
+          begin
+            ReadBufSize := ReadCount;
+            if ReadBufSize > MaxBufSize then
+              ReadBufSize := MaxBufSize;
+            Stream.ReadBuffer(Bytes[Size - ReadCount], ReadBufSize);
+            Dec(ReadCount, ReadBufSize);
+          end;
+        end
+        else
+        {$ENDIF WORKAROUND_NETWORK_FILE_INSUFFICIENT_RESOURCES}
+          Stream.ReadBuffer(StreamInfo.AllocationBase^, Size);
+      end;
+    end;
+
+    if Encoding = nil then
+    begin
+      // Determine the encoding from the BOM
+      if Utf8WithoutBOM then
+        Encoding := TEncoding.UTF8
+      else
+        Encoding := TEncoding.Default;
+
+      if Size >= 2 then
+      begin
+        if (Bytes[0] = $EF) and (Bytes[1] = $BB) then
+        begin
+          if Bytes[2] = $BF then
+          begin
+            Encoding := TEncoding.UTF8;
+            BufStart := 3;
+          end;
+        end
+        else if (Bytes[0] = $FF) and (Bytes[1] = $FE) then
+        begin
+          if (Bytes[2] = 0) and (Bytes[3] = 0) then
+          begin
+            raise EJsonException.CreateRes(@RsUnsupportedFileEncoding);
+            //Result := bomUtf32LE;
+            //BufStart := 4;
+          end
+          else
+          begin
+            Encoding := TEncoding.Unicode;
+            BufStart := 2;
+          end;
+        end
+        else if (Bytes[0] = $FE) and (Bytes[1] = $FF) then
+        begin
+          Encoding := TEncoding.BigEndianUnicode;
+          BufStart := 2;
+        end
+        else if (Bytes[0] = 0) and (Bytes[1] = 0) and (Size >= 4) then
+        begin
+          if (Bytes[2] = $FE) and (Bytes[3] = $FF) then
+          begin
+            raise EJsonException.CreateRes(@RsUnsupportedFileEncoding);
+            //Result := bomUtf32BE;
+            //BufStart := 4;
+          end;
+        end;
+      end;
+    end;
+    Inc(Bytes, BufStart);
+    StreamInfo.Buffer := Bytes;
+    StreamInfo.Size := Size - BufStart;
+  except
+    FreeMem(StreamInfo.AllocationBase);
+    raise;
+  end;
+end;
+
+procedure TJsonBaseObject.LoadFromStream(Stream: TStream; Encoding: TEncoding; Utf8WithoutBOM: Boolean);
+var
+  StreamInfo: TStreamInfo;
+  S: string;
+  L: Integer;
+begin
+  GetStreamBytes(Stream, Encoding, Utf8WithoutBOM, StreamInfo);
+  try
+    if Encoding = TEncoding.UTF8 then
+      FromUtf8JSON(StreamInfo.Buffer, StreamInfo.Size)
+    else if Encoding = TEncoding.Unicode then
+      FromJSON(PWideChar(Pointer(StreamInfo.Buffer)), StreamInfo.Size div SizeOf(WideChar))
+    else
+    begin
+      L := TEncodingStrictAccess(Encoding).GetCharCountEx(StreamInfo.Buffer, StreamInfo.Size);
+      SetLength(S, L);
+      if L > 0 then
+        TEncodingStrictAccess(Encoding).GetCharsEx(StreamInfo.Buffer, StreamInfo.Size, PChar(Pointer(S)), L)
+      else if StreamInfo.Size > 0 then
+        ErrorNoMappingForUnicodeCharacter;
+
+      // release memory
+      FreeMem(StreamInfo.AllocationBase);
+      StreamInfo.AllocationBase := nil;
+
+      FromJSON(S);
+    end;
+  finally
+    FreeMem(StreamInfo.AllocationBase);
+  end;
+end;
+
+procedure TJsonBaseObject.SaveToFile(const FileName: string; Compact: Boolean; Encoding: TEncoding; Utf8WithoutBOM: Boolean);
+var
+  Stream: TStream;
+begin
+  Stream := TFileStream.Create(FileName, fmCreate or fmShareDenyWrite);
+  try
+    SaveToStream(Stream, Compact, Encoding, Utf8WithoutBOM);
+  finally
+    Stream.Free;
+  end;
+end;
+
+procedure TJsonBaseObject.SaveToStream(Stream: TStream; Compact: Boolean; Encoding: TEncoding; Utf8WithoutBOM: Boolean);
+var
+  Preamble: TBytes;
+  Writer: TJsonOutputWriter;
+begin
+  if Utf8WithoutBOM and ((Encoding = TEncoding.UTF8) or (Encoding = nil)) then
+    Encoding := TEncoding.UTF8
+  else
+  begin
+    if Encoding = nil then
+      Encoding := TEncoding.Default;
+
+    Preamble := Encoding.GetPreamble;
+    if Preamble <> nil then
+      Stream.Write(Preamble[0], Length(Preamble));
+  end;
+
+  Writer.Init(Compact, Stream, Encoding, nil);
+  try
+    InternToJSON(Writer);
+  finally
+    Writer.StreamDone;
+  end;
+end;
+
+procedure TJsonBaseObject.SaveToLines(Lines: TStrings);
+var
+  Writer: TJsonOutputWriter;
+begin
+  Writer.Init(False, nil, nil, Lines);
+  try
+    InternToJSON(Writer);
+  finally
+    Writer.LinesDone;
+  end;
+end;
+
+function TJsonBaseObject.ToJSON(Compact: Boolean): string;
+var
+  Writer: TJsonOutputWriter;
+begin
+  Writer.Init(Compact, nil, nil, nil);
+  try
+    InternToJSON(Writer);
+  finally
+    Result := Writer.Done;
+  end;
+end;
+
+function TJsonBaseObject.ToString: string;
+begin
+  Result := ToJSON;
+end;
+
+class procedure TJsonBaseObject.InternInitAndAssignItem(Dest, Source: PJsonDataValue);
+begin
+  Dest.FTyp := Source.FTyp;
+  case Source.Typ of
+    jdtString:
+      begin
+        Dest.FValue.P := nil;
+        string(Dest.FValue.S) := string(Source.FValue.S);
+      end;
+    jdtInt:
+      Dest.FValue.I := Source.FValue.I;
+    jdtLong:
+      Dest.FValue.L := Source.FValue.L;
+    jdtFloat:
+      Dest.FValue.F := Source.FValue.F;
+    jdtBool:
+      Dest.FValue.B := Source.FValue.B;
+    jdtArray:
+      begin
+        {$IFDEF AUTOREFCOUNT}
+        Dest.FValue.A := nil;
+        {$ENDIF AUTOREFCOUNT}
+        if Source.FValue.A <> nil then
+        begin
+          {$IFDEF USE_FAST_AUTOREFCOUNT}
+          Dest.FValue.A := TJsonArray.Create;
+          TJsonArray(Dest.FValue.A).ARCObjAddRef;
+          {$ELSE}
+          TJsonArray(Dest.FValue.A) := TJsonArray.Create;
+          {$ENDIF USE_FAST_AUTOREFCOUNT}
+          TJsonArray(Dest.FValue.A).Assign(TJsonArray(Source.FValue.A));
+        end
+        {$IFNDEF AUTOREFCOUNT}
+        else
+          Dest.FValue.A := nil;
+        {$ENDIF ~AUTOREFCOUNT}
+      end;
+    jdtObject:
+      begin
+        {$IFDEF AUTOREFCOUNT}
+        Dest.FValue.O := nil;
+        {$ENDIF AUTOREFCOUNT}
+        if Source.FValue.O <> nil then
+        begin
+          {$IFDEF USE_FAST_AUTOREFCOUNT}
+          Dest.FValue.O := TJsonObject.Create;
+          TJsonObject(Dest.FValue.O).ARCObjAddRef;
+          {$ELSE}
+          TJsonObject(Dest.FValue.O) := TJsonObject.Create;
+          {$ENDIF USE_FAST_AUTOREFCOUNT}
+          TJsonObject(Dest.FValue.O).Assign(TJsonObject(Source.FValue.O));
+        end
+        {$IFNDEF AUTOREFCOUNT}
+        else
+          Dest.FValue.O := nil;
+        {$ENDIF ~AUTOREFCOUNT}
+      end;
+  end;
+end;
+
+procedure TJsonDataValue.TypeCastError(ExpectedType: TJsonDataType);
+const
+  DataTypeNames: array[TJsonDataType] of string = (
+    'null', 'String', 'Integer', 'Long', 'Float', 'Bool', 'Array', 'Object'
+  );
+begin
+  raise EJsonException.CreateResFmt(@RsTypeCastError, [DataTypeNames[FTyp], DataTypeNames[ExpectedType]])
+        {$IFDEF HAS_RETURN_ADDRESS} at ReturnAddress{$ENDIF};
+end;
+
+{ TJsonArray }
+
+destructor TJsonArray.Destroy;
+begin
+  Clear;
+  FreeMem(FItems);
+  FItems := nil;
+  //inherited Destroy;
+end;
+
+procedure TJsonArray.Clear;
+var
+  I: Integer;
+begin
+  for I := 0 to FCount - 1 do
+    FItems[I].Clear;
+  FCount := 0;
+end;
+
+procedure TJsonArray.Delete(Index: Integer);
+begin
+  if (Index < 0) or (Index >= FCount) then
+    ListError(@SListIndexError, Index);
+  FItems[Index].Clear;
+  Dec(FCount);
+  if Index < FCount then
+    Move(FItems[Index + 1], FItems[Index], (FCount - Index) * SizeOf(TJsonDataValue));
+end;
+
+function TJsonArray.AddItem: PJsonDataValue;
+begin
+  if FCount = FCapacity then
+    Grow;
+  Result := @FItems[FCount];
+  Result.FTyp := jdtNone;
+  Result.FValue.P := nil;
+  Inc(FCount);
+end;
+
+function TJsonArray.InsertItem(Index: Integer): PJsonDataValue;
+begin
+  if Cardinal(Index) > Cardinal(FCount) then
+    RaiseListError(Index);
+
+  if FCount = FCapacity then
+    Grow;
+  Result := @FItems[Index];
+  if Index < FCount then
+    Move(Result^, FItems[Index + 1], (FCount - Index) * SizeOf(TJsonDataValue));
+  Result.FTyp := jdtNone;
+  Result.FValue.P := nil;
+  Inc(FCount);
+end;
+
+procedure TJsonArray.Grow;
+var
+  C, Delta: Integer;
+begin
+  C := FCapacity;
+  if C > 64 then
+    Delta := C div 4
+  else if C > 8 then
+    Delta := 16
+  else
+    Delta := 4;
+  FCapacity := C + Delta;
+  InternApplyCapacity;
+end;
+
+procedure TJsonArray.InternApplyCapacity;
+begin
+  ReallocMem(Pointer(FItems), FCapacity * SizeOf(TJsonDataValue));
+end;
+
+procedure TJsonArray.SetCapacity(const Value: Integer);
+var
+  I: Integer;
+begin
+  if Value <> FCapacity then
+  begin
+    if FCapacity < FCount then
+    begin
+      // delete all overlapping items
+      for I := FCapacity to FCount - 1 do
+        FItems[I].Clear;
+      FCount := FCapacity;
+    end;
+    FCapacity := Value;
+    InternApplyCapacity;
+  end;
+end;
+
+function TJsonArray.GetArray(Index: Integer): TJsonArray;
+begin
+  {$IFDEF CHECK_ARRAY_INDEX}
+  if Cardinal(Index) >= Cardinal(FCount) then
+    RaiseListError(Index);
+  {$ENDIF CHECK_ARRAY_INDEX}
+  Result := FItems[Index].ArrayValue;
+end;
+
+function TJsonArray.GetBool(Index: Integer): Boolean;
+begin
+  {$IFDEF CHECK_ARRAY_INDEX}
+  if Cardinal(Index) >= Cardinal(FCount) then
+    RaiseListError(Index);
+  {$ENDIF CHECK_ARRAY_INDEX}
+  Result := FItems[Index].BoolValue;
+end;
+
+function TJsonArray.GetObject(Index: Integer): TJsonObject;
+begin
+  {$IFDEF CHECK_ARRAY_INDEX}
+  if Cardinal(Index) >= Cardinal(FCount) then
+    RaiseListError(Index);
+  {$ENDIF CHECK_ARRAY_INDEX}
+  Result := FItems[Index].ObjectValue;
+end;
+
+function TJsonArray.GetInt(Index: Integer): Integer;
+begin
+  {$IFDEF CHECK_ARRAY_INDEX}
+  if Cardinal(Index) >= Cardinal(FCount) then
+    RaiseListError(Index);
+  {$ENDIF CHECK_ARRAY_INDEX}
+  Result := FItems[Index].IntValue;
+end;
+
+function TJsonArray.GetLong(Index: Integer): Int64;
+begin
+  {$IFDEF CHECK_ARRAY_INDEX}
+  if Cardinal(Index) >= Cardinal(FCount) then
+    RaiseListError(Index);
+  {$ENDIF CHECK_ARRAY_INDEX}
+  Result := FItems[Index].LongValue;
+end;
+
+function TJsonArray.GetFloat(Index: Integer): Double;
+begin
+  {$IFDEF CHECK_ARRAY_INDEX}
+  if Cardinal(Index) >= Cardinal(FCount) then
+    RaiseListError(Index);
+  {$ENDIF CHECK_ARRAY_INDEX}
+  Result := FItems[Index].FloatValue;
+end;
+
+function TJsonArray.GetItem(Index: Integer): PJsonDataValue;
+begin
+  {$IFDEF CHECK_ARRAY_INDEX}
+  if Cardinal(Index) >= Cardinal(FCount) then
+    RaiseListError(Index);
+  {$ENDIF CHECK_ARRAY_INDEX}
+  Result := @FItems[Index];
+end;
+
+function TJsonArray.GetString(Index: Integer): string;
+begin
+  {$IFDEF CHECK_ARRAY_INDEX}
+  if Cardinal(Index) >= Cardinal(FCount) then
+    RaiseListError(Index);
+  {$ENDIF CHECK_ARRAY_INDEX}
+  Result := FItems[Index].Value;
+end;
+
+procedure TJsonArray.Add(const AValue: TJsonObject);
+var
+  Data: PJsonDataValue;
+begin
+  Data := AddItem;
+  Data.ObjectValue := AValue;
+end;
+
+procedure TJsonArray.Add(const AValue: TJsonArray);
+var
+  Data: PJsonDataValue;
+begin
+  Data := AddItem;
+  Data.ArrayValue := AValue;
+end;
+
+procedure TJsonArray.Add(AValue: Boolean);
+var
+  Data: PJsonDataValue;
+begin
+  Data := AddItem;
+  Data.BoolValue := AValue;
+end;
+
+procedure TJsonArray.Add(AValue: Integer);
+var
+  Data: PJsonDataValue;
+begin
+  Data := AddItem;
+  Data.IntValue := AValue;
+end;
+
+procedure TJsonArray.Add(AValue: Int64);
+var
+  Data: PJsonDataValue;
+begin
+  Data := AddItem;
+  Data.LongValue := AValue;
+end;
+
+procedure TJsonArray.Add(AValue: Double);
+var
+  Data: PJsonDataValue;
+begin
+  Data := AddItem;
+  Data.FloatValue := AValue;
+end;
+
+procedure TJsonArray.Add(const AValue: string);
+var
+  Data: PJsonDataValue;
+begin
+  Data := AddItem;
+  Data.Value := AValue;
+end;
+
+function TJsonArray.AddArray: TJsonArray;
+begin
+  {$IFDEF USE_FAST_AUTOREFCOUNT}
+  if Result <> nil then
+    Result.ARCObjRelease;
+  Pointer(Result) := TJsonArray.Create;
+  Result.ARCObjAddRef;
+  {$ELSE}
+  Result := TJsonArray.Create;
+  {$ENDIF USE_FAST_AUTOREFCOUNT}
+  Add(Result);
+end;
+
+function TJsonArray.AddObject: TJsonObject;
+begin
+  {$IFDEF USE_FAST_AUTOREFCOUNT}
+  if Result <> nil then
+    Result.ARCObjRelease;
+  Pointer(Result) := TJsonObject.Create;
+  Result.ARCObjAddRef;
+  {$ELSE}
+  Result := TJsonObject.Create;
+  {$ENDIF USE_FAST_AUTOREFCOUNT}
+  Add(Result);
+end;
+
+procedure TJsonArray.AddObject(const Value: TJsonObject);
+begin
+  Add(Value);
+end;
+
+procedure TJsonArray.Insert(Index: Integer; const AValue: TJsonObject);
+var
+  Data: PJsonDataValue;
+begin
+  Data := InsertItem(Index);
+  Data.ObjectValue := AValue;
+end;
+
+procedure TJsonArray.Insert(Index: Integer; const AValue: TJsonArray);
+var
+  Data: PJsonDataValue;
+begin
+  Data := InsertItem(Index);
+  Data.ArrayValue := AValue;
+end;
+
+procedure TJsonArray.Insert(Index: Integer; AValue: Boolean);
+var
+  Data: PJsonDataValue;
+begin
+  Data := InsertItem(Index);
+  Data.BoolValue := AValue;
+end;
+
+procedure TJsonArray.Insert(Index: Integer; AValue: Integer);
+var
+  Data: PJsonDataValue;
+begin
+  Data := InsertItem(Index);
+  Data.IntValue := AValue;
+end;
+
+procedure TJsonArray.Insert(Index: Integer; AValue: Int64);
+var
+  Data: PJsonDataValue;
+begin
+  Data := InsertItem(Index);
+  Data.LongValue := AValue;
+end;
+
+procedure TJsonArray.Insert(Index: Integer; AValue: Double);
+var
+  Data: PJsonDataValue;
+begin
+  Data := InsertItem(Index);
+  Data.FloatValue := AValue;
+end;
+
+procedure TJsonArray.Insert(Index: Integer; const AValue: string);
+var
+  Data: PJsonDataValue;
+begin
+  Data := InsertItem(Index);
+  Data.Value := AValue;
+end;
+
+function TJsonArray.InsertArray(Index: Integer): TJsonArray;
+begin
+  Result := TJsonArray.Create;
+  {$IFDEF AUTOREFCOUNT}
+  Insert(Index, Result);
+  {$ELSE}
+  try
+    Insert(Index, Result);
+  except
+    Result.Free;
+    raise;
+  end;
+  {$ENDIF AUTOREFCOUNT}
+end;
+
+function TJsonArray.InsertObject(Index: Integer): TJsonObject;
+begin
+  Result := TJsonObject.Create;
+  {$IFDEF AUTOREFCOUNT}
+  Insert(Index, Result);
+  {$ELSE}
+  try
+    Insert(Index, Result);
+  except
+    Result.Free;
+    raise;
+  end;
+  {$ENDIF AUTOREFCOUNT}
+end;
+
+procedure TJsonArray.InsertObject(Index: Integer; const Value: TJsonObject);
+begin
+  {$IFDEF CHECK_ARRAY_INDEX}
+  if Cardinal(Index) >= Cardinal(FCount) then
+    RaiseListError(Index);
+  {$ENDIF CHECK_ARRAY_INDEX}
+  Insert(Index, Value);
+end;
+
+procedure TJsonArray.SetString(Index: Integer; const Value: string);
+begin
+  {$IFDEF CHECK_ARRAY_INDEX}
+  if Cardinal(Index) >= Cardinal(FCount) then
+    RaiseListError(Index);
+  {$ENDIF CHECK_ARRAY_INDEX}
+  FItems[Index].Value := Value;
+end;
+
+procedure TJsonArray.SetInt(Index: Integer; const Value: Integer);
+begin
+  {$IFDEF CHECK_ARRAY_INDEX}
+  if Cardinal(Index) >= Cardinal(FCount) then
+    RaiseListError(Index);
+  {$ENDIF CHECK_ARRAY_INDEX}
+  FItems[Index].IntValue := Value;
+end;
+
+procedure TJsonArray.SetLong(Index: Integer; const Value: Int64);
+begin
+  {$IFDEF CHECK_ARRAY_INDEX}
+  if Cardinal(Index) >= Cardinal(FCount) then
+    RaiseListError(Index);
+  {$ENDIF CHECK_ARRAY_INDEX}
+  FItems[Index].LongValue := Value;
+end;
+
+procedure TJsonArray.SetFloat(Index: Integer; const Value: Double);
+begin
+  {$IFDEF CHECK_ARRAY_INDEX}
+  if Cardinal(Index) >= Cardinal(FCount) then
+    RaiseListError(Index);
+  {$ENDIF CHECK_ARRAY_INDEX}
+  FItems[Index].FloatValue := Value;
+end;
+
+procedure TJsonArray.SetBool(Index: Integer; const Value: Boolean);
+begin
+  {$IFDEF CHECK_ARRAY_INDEX}
+  if Cardinal(Index) >= Cardinal(FCount) then
+    RaiseListError(Index);
+  {$ENDIF CHECK_ARRAY_INDEX}
+  FItems[Index].BoolValue := Value;
+end;
+
+procedure TJsonArray.SetArray(Index: Integer; const Value: TJsonArray);
+begin
+  {$IFDEF CHECK_ARRAY_INDEX}
+  if Cardinal(Index) >= Cardinal(FCount) then
+    RaiseListError(Index);
+  {$ENDIF CHECK_ARRAY_INDEX}
+  FItems[Index].ArrayValue := Value;
+end;
+
+procedure TJsonArray.SetObject(Index: Integer; const Value: TJsonObject);
+begin
+  {$IFDEF CHECK_ARRAY_INDEX}
+  if Cardinal(Index) >= Cardinal(FCount) then
+    RaiseListError(Index);
+  {$ENDIF CHECK_ARRAY_INDEX}
+  FItems[Index].ObjectValue := Value;
+end;
+
+function TJsonArray.GetType(Index: Integer): TJsonDataType;
+begin
+  {$IFDEF CHECK_ARRAY_INDEX}
+  if Cardinal(Index) >= Cardinal(FCount) then
+    RaiseListError(Index);
+  {$ENDIF CHECK_ARRAY_INDEX}
+  Result := FItems[Index].Typ;
+end;
+
+function TJsonArray.GetValue(Index: Integer): TJsonDataValueHelper;
+begin
+  {$IFDEF CHECK_ARRAY_INDEX}
+  if Cardinal(Index) >= Cardinal(FCount) then
+    RaiseListError(Index);
+  {$ENDIF CHECK_ARRAY_INDEX}
+  Result.FData.FIntern := @FItems[Index];
+  Result.FData.FTyp := jdtNone;
+end;
+
+procedure TJsonArray.SetValue(Index: Integer; const Value: TJsonDataValueHelper);
+begin
+  {$IFDEF CHECK_ARRAY_INDEX}
+  if Cardinal(Index) >= Cardinal(FCount) then
+    RaiseListError(Index);
+  {$ENDIF CHECK_ARRAY_INDEX}
+  TJsonDataValueHelper.SetInternValue(@FItems[Index], Value);
+end;
+
+procedure TJsonArray.InternToJSON(var Writer: TJsonOutputWriter);
+var
+  I: Integer;
+begin
+  if FCount = 0 then
+    Writer.AppendValue('[]')
+  else
+  begin
+    Writer.Indent('[');
+    FItems[0].InternToJSON(Writer);
+    for I := 1 to FCount - 1 do
+    begin
+      Writer.AppendSeparator(',');
+      FItems[I].InternToJSON(Writer);
+    end;
+    Writer.Unindent(']');
+  end;
+end;
+
+procedure TJsonArray.Assign(ASource: TJsonArray);
+var
+  I: Integer;
+begin
+  Clear;
+  if ASource <> nil then
+  begin
+    if FCapacity < ASource.Count then
+    begin
+      FCapacity := ASource.Count;
+      ReallocMem(FItems, ASource.Count * SizeOf(TJsonDataValue));
+    end;
+    FCount := ASource.Count;
+    for I := 0 to ASource.Count - 1 do
+      InternInitAndAssignItem(@FItems[I], @ASource.FItems[I]);
+  end
+  else
+  begin
+    FreeMem(FItems);
+    FCapacity := 0;
+  end;
+end;
+
+class procedure TJsonArray.RaiseListError(Index: Integer);
+begin
+  ListError(@SListIndexError, Index);
+end;
+
+procedure TJsonArray.SetCount(const Value: Integer);
+var
+  I: Integer;
+begin
+  if Value <> FCount then
+  begin
+    SetCapacity(Value);
+    // Initialize new Items to "null"
+    for I := FCount to Value - 1 do
+    begin
+      FItems[I].FTyp := jdtObject;
+      FItems[I].FValue.P := nil;
+    end;
+    FCount := Value;
+  end;
+end;
+
+{ TJsonObject }
+
+destructor TJsonObject.Destroy;
+begin
+  Clear;
+  FreeMem(FItems);
+  FreeMem(FNames);
+  //inherited Destroy;
+end;
+
+{$IFDEF USE_LAST_NAME_STRING_LITERAL_CACHE}
+procedure TJsonObject.UpdateLastValueItem(const Name: string; Item: PJsonDataValue);
+begin
+  if (Pointer(Name) <> nil) and (PLongInt(@PByte(Name)[-8])^ = -1) then // string literal
+  begin
+    FLastValueItem := Item;
+    FLastValueItemNamePtr := Pointer(Name);
+  end
+  else
+    FLastValueItem := nil;
+end;
+{$ENDIF USE_LAST_NAME_STRING_LITERAL_CACHE}
+
+procedure TJsonObject.Grow;
+var
+  C, Delta: Integer;
+begin
+  C := FCapacity;
+  if C > 64 then
+    Delta := C div 4
+  else if C > 8 then
+    Delta := 16
+  else
+    Delta := 4;
+  FCapacity := C + Delta;
+  InternApplyCapacity;
+end;
+
+procedure TJsonObject.InternApplyCapacity;
+begin
+  {$IFDEF USE_LAST_NAME_STRING_LITERAL_CACHE}
+  FLastValueItem := nil;
+  {$ENDIF USE_LAST_NAME_STRING_LITERAL_CACHE}
+  ReallocMem(Pointer(FItems), FCapacity * SizeOf(FItems[0]));
+  ReallocMem(Pointer(FNames), FCapacity * SizeOf(FNames[0]));
+end;
+
+procedure TJsonObject.SetCapacity(const Value: Integer);
+var
+  I: Integer;
+begin
+  if Value <> FCapacity then
+  begin
+    if FCapacity < FCount then
+    begin
+      // delete all overlapping items
+      for I := FCapacity to FCount - 1 do
+      begin
+        FNames[I] := '';
+        FItems[I].Clear;
+      end;
+      FCount := FCapacity;
+    end;
+    FCapacity := Value;
+    InternApplyCapacity;
+  end;
+end;
+
+procedure TJsonObject.Clear;
+var
+  I: Integer;
+begin
+  {$IFDEF USE_LAST_NAME_STRING_LITERAL_CACHE}
+  FLastValueItem := nil;
+  {$ENDIF USE_LAST_NAME_STRING_LITERAL_CACHE}
+  for I := 0 to FCount - 1 do
+  begin
+    FNames[I] := '';
+    FItems[I].Clear;
+  end;
+  FCount := 0;
+end;
+
+procedure TJsonObject.Remove(const Name: string);
+var
+  Idx: Integer;
+begin
+  Idx := IndexOf(Name);
+  if Idx <> -1 then
+    Delete(Idx);
+end;
+
+function TJsonObject.AddItem(const Name: string): PJsonDataValue;
+var
+  P: PString;
+begin
+  if FCount = FCapacity then
+    Grow;
+  Result := @FItems[FCount];
+  P := @FNames[FCount];
+  Inc(FCount);
+  Pointer(P^) := nil; // initialize the string
+  {$IFDEF USE_NAME_STRING_LITERAL}
+  AsgString(P^, Name);
+  {$ELSE}
+  P^ := Name;
+  {$ENDIF USE_NAME_STRING_LITERAL}
+
+  Result.FValue.P := nil;
+  Result.FTyp := jdtNone;
+end;
+
+function TJsonObject.InternAddItem(var Name: string): PJsonDataValue;
+var
+  P: PString;
+begin
+  if FCount = FCapacity then
+    Grow;
+  Result := @FItems[FCount];
+  P := @FNames[FCount];
+  Inc(FCount);
+  // Transfer the string without going through UStrAsg and UStrClr
+  Pointer(P^) := Pointer(Name);
+  Pointer(Name) := nil;
+
+  Result.FValue.P := nil;
+  Result.FTyp := jdtNone;
+end;
+
+function TJsonObject.GetArray(const Name: string): TJsonArray;
+var
+  Item: PJsonDataValue;
+begin
+  if FindItem(Name, Item) then
+    Result := Item.ArrayValue
+  else
+  begin
+    Result := TJsonArray.Create;
+    AddItem(Name).ArrayValue := Result;
+    {$IFDEF USE_LAST_NAME_STRING_LITERAL_CACHE}
+    UpdateLastValueItem(Name, Item);
+    {$ENDIF USE_LAST_NAME_STRING_LITERAL_CACHE}
+  end;
+end;
+
+function TJsonObject.GetBool(const Name: string): Boolean;
+var
+  Item: PJsonDataValue;
+begin
+  if FindItem(Name, Item) then
+    Result := Item.BoolValue
+  else
+    Result := False;
+end;
+
+function TJsonObject.GetInt(const Name: string): Integer;
+var
+  Item: PJsonDataValue;
+begin
+  if FindItem(Name, Item) then
+    Result := Item.IntValue
+  else
+    Result := 0;
+end;
+
+function TJsonObject.GetLong(const Name: string): Int64;
+var
+  Item: PJsonDataValue;
+begin
+  if FindItem(Name, Item) then
+    Result := Item.LongValue
+  else
+    Result := 0;
+end;
+
+function TJsonObject.GetFloat(const Name: string): Double;
+var
+  Item: PJsonDataValue;
+begin
+  if FindItem(Name, Item) then
+    Result := Item.FloatValue
+  else
+    Result := 0;
+end;
+
+function TJsonObject.GetObject(const Name: string): TJsonObject;
+var
+  Item: PJsonDataValue;
+begin
+  if FindItem(Name, Item) then
+    Result := Item.ObjectValue
+  else
+  begin
+    Result := TJsonObject.Create;
+    AddItem(Name).ObjectValue := Result;
+    {$IFDEF USE_LAST_NAME_STRING_LITERAL_CACHE}
+    UpdateLastValueItem(Name, Item);
+    {$ENDIF USE_LAST_NAME_STRING_LITERAL_CACHE}
+  end;
+end;
+
+function TJsonObject.GetString(const Name: string): string;
+var
+  Item: PJsonDataValue;
+begin
+  if FindItem(Name, Item) then
+    Result := Item.Value
+  else
+    Result := '';
+end;
+
+procedure TJsonObject.SetArray(const Name: string; const Value: TJsonArray);
+begin
+  RequireItem(Name).ArrayValue := Value;
+end;
+
+procedure TJsonObject.SetBool(const Name: string; const Value: Boolean);
+begin
+  RequireItem(Name).BoolValue := Value;
+end;
+
+procedure TJsonObject.SetInt(const Name: string; const Value: Integer);
+begin
+  RequireItem(Name).IntValue := Value;
+end;
+
+procedure TJsonObject.SetLong(const Name: string; const Value: Int64);
+begin
+  RequireItem(Name).LongValue := Value;
+end;
+
+procedure TJsonObject.SetFloat(const Name: string; const Value: Double);
+begin
+  RequireItem(Name).FloatValue := Value;
+end;
+
+procedure TJsonObject.SetObject(const Name: string; const Value: TJsonObject);
+begin
+  RequireItem(Name).ObjectValue := Value;
+end;
+
+procedure TJsonObject.SetString(const Name, Value: string);
+begin
+  RequireItem(Name).Value := Value;
+end;
+
+function TJsonObject.GetType(const Name: string): TJsonDataType;
+var
+  Item: PJsonDataValue;
+begin
+  if FindItem(Name, Item) then
+    Result := Item.Typ
+  else
+    Result := jdtNone;
+end;
+
+function TJsonObject.Contains(const Name: string): Boolean;
+{$IFDEF USE_LAST_NAME_STRING_LITERAL_CACHE}
+var
+  Item: PJsonDataValue;
+{$ENDIF USE_LAST_NAME_STRING_LITERAL_CACHE}
+begin
+  {$IFDEF USE_LAST_NAME_STRING_LITERAL_CACHE}
+  Result := FindItem(Name, Item);
+  {$ELSE}
+  Result := IndexOf(Name) <> -1;
+  {$ENDIF USE_LAST_NAME_STRING_LITERAL_CACHE}
+end;
+
+function TJsonObject.IndexOf(const Name: string): Integer;
+var
+  P: PJsonStringArray;
+begin
+  P := FNames;
+  for Result := 0 to FCount - 1 do
+    if {(Pointer(Name) = Pointer(P[Result])) or} (Name = P[Result]) then
+      Exit;
+  Result := -1;
+end;
+
+function TJsonObject.FindItem(const Name: string; var Item: PJsonDataValue): Boolean;
+var
+  Idx: Integer;
+begin
+  {$IFDEF USE_LAST_NAME_STRING_LITERAL_CACHE}
+  { If "Name" is a string literal we can compare the pointer of the last stored value instead of
+    searching the list. }
+  if (FLastValueItem <> nil) and (Pointer(Name) = FLastValueItemNamePtr) then
+  begin
+    Item := FLastValueItem;
+    Result := True;
+  end
+  else
+  {$ENDIF USE_LAST_NAME_STRING_LITERAL_CACHE}
+  begin
+    Idx := IndexOf(Name);
+    Result := Idx <> -1;
+    if Result then
+    begin
+      Item := @FItems[Idx];
+      {$IFDEF USE_LAST_NAME_STRING_LITERAL_CACHE}
+      UpdateLastValueItem(Name, Item);
+      {$ENDIF USE_LAST_NAME_STRING_LITERAL_CACHE}
+    end
+    else
+      Item := nil;
+  end;
+end;
+
+function TJsonObject.RequireItem(const Name: string): PJsonDataValue;
+begin
+  if not FindItem(Name, Result) then
+  begin
+    Result := AddItem(Name);
+    {$IFDEF USE_LAST_NAME_STRING_LITERAL_CACHE}
+    UpdateLastValueItem(Name, Result);
+    {$ENDIF USE_LAST_NAME_STRING_LITERAL_CACHE}
+  end;
+end;
+
+procedure TJsonObject.InternToJSON(var Writer: TJsonOutputWriter);
+var
+  I: Integer;
+begin
+  if Count = 0 then
+    Writer.AppendValue('{}')
+  else
+  begin
+    Writer.Indent('{');
+    TJsonBaseObject.StrToJSONStr(Writer.AppendIntro, FNames[0]);
+    FItems[0].InternToJSON(Writer);
+    for I := 1 to FCount - 1 do
+    begin
+      Writer.AppendSeparator(',');
+      TJsonBaseObject.StrToJSONStr(Writer.AppendIntro, FNames[I]);
+      FItems[I].InternToJSON(Writer);
+    end;
+    Writer.Unindent('}');
+  end;
+end;
+
+function TJsonObject.GetName(Index: Integer): string;
+begin
+  Result := FNames[Index];
+end;
+
+function TJsonObject.GetItem(Index: Integer): PJsonDataValue;
+begin
+  Result := @FItems[Index];
+end;
+
+procedure TJsonObject.Delete(Index: Integer);
+begin
+  if (Index < 0) or (Index >= FCount) then
+    ListError(@SListIndexError, Index);
+
+  {$IFDEF USE_LAST_NAME_STRING_LITERAL_CACHE}
+  if @FItems[Index] = FLastValueItem then
+  begin
+    FLastValueItem := nil;
+    //FLastValueItemNamePtr := nil;
+  end;
+  {$ENDIF USE_LAST_NAME_STRING_LITERAL_CACHE}
+  FNames[Index] := '';
+  FItems[Index].Clear;
+  Dec(FCount);
+  if Index < FCount then
+  begin
+    Move(FItems[Index + 1], FItems[Index], (FCount - Index) * SizeOf(FItems[0]));
+    Move(FNames[Index + 1], FNames[Index], (FCount - Index) * SizeOf(FNames[0]));
+  end;
+end;
+
+function TJsonObject.GetValue(const Name: string): TJsonDataValueHelper;
+begin
+  if not FindItem(Name, Result.FData.FIntern) then
+  begin
+    Result.FData.FIntern := nil;
+    Result.FData.FNameResolver := Self;
+    Result.FData.FName := Name;
+  end;
+  Result.FData.FTyp := jdtNone;
+end;
+
+procedure TJsonObject.SetValue(const Name: string; const Value: TJsonDataValueHelper);
+var
+  Item: PJsonDataValue;
+begin
+  Item := RequireItem(Name);
+  TJsonDataValueHelper.SetInternValue(Item, Value);
+end;
+
+procedure TJsonObject.InternAdd(var AName: string; const AValue: TJsonArray);
+var
+  Data: PJsonDataValue;
+begin
+  Data := InternAddItem(AName);
+  Data.InternSetArrayValue(AValue);
+end;
+
+procedure TJsonObject.InternAdd(var AName: string; const AValue: TJsonObject);
+var
+  Data: PJsonDataValue;
+begin
+  Data := InternAddItem(AName);
+  Data.InternSetObjectValue(AValue);
+end;
+
+procedure TJsonObject.InternAdd(var AName: string; AValue: Boolean);
+var
+  Data: PJsonDataValue;
+begin
+  Data := InternAddItem(AName);
+  Data.BoolValue := AValue;
+end;
+
+procedure TJsonObject.InternAdd(var AName: string; AValue: Integer);
+var
+  Data: PJsonDataValue;
+begin
+  Data := InternAddItem(AName);
+  Data.IntValue := AValue;
+end;
+
+procedure TJsonObject.InternAdd(var AName: string; AValue: Int64);
+var
+  Data: PJsonDataValue;
+begin
+  Data := InternAddItem(AName);
+  Data.LongValue := AValue;
+end;
+
+procedure TJsonObject.InternAdd(var AName: string; AValue: Double);
+var
+  Data: PJsonDataValue;
+begin
+  Data := InternAddItem(AName);
+  Data.FloatValue := AValue;
+end;
+
+procedure TJsonObject.InternAdd(var AName: string; const AValue: string);
+var
+  Data: PJsonDataValue;
+begin
+  Data := InternAddItem(AName);
+  Data.InternSetValue(AValue);
+end;
+
+function TJsonObject.InternAddArray(var AName: string): TJsonArray;
+begin
+  {$IFDEF USE_FAST_AUTOREFCOUNT}
+  if Result <> nil then
+    Result.ARCObjRelease;
+  Pointer(Result) := TJsonArray.Create;
+  Inc(Result.FRefCount); //Result.ARCObjAddRef;
+  {$ELSE}
+  Result := TJsonArray.Create;
+  {$ENDIF USE_FAST_AUTOREFCOUNT}
+  InternAdd(AName, Result);
+end;
+
+function TJsonObject.InternAddObject(var AName: string): TJsonObject;
+begin
+  {$IFDEF USE_FAST_AUTOREFCOUNT}
+  if Result <> nil then
+    Result.ARCObjRelease;
+  Pointer(Result) := TJsonObject.Create;
+  Inc(Result.FRefCount); //Result.ARCObjAddRef;
+  {$ELSE}
+  Result := TJsonObject.Create;
+  {$ENDIF USE_FAST_AUTOREFCOUNT}
+  InternAdd(AName, Result);
+end;
+
+procedure TJsonObject.ToSimpleObject(AObject: TObject; ACaseSensitive: Boolean);
+var
+  Index, Count: Integer;
+  PropList: PPropList;
+  PropType: PTypeInfo;
+  PropName: string;
+  Item: PJsonDataValue;
+  V: Variant;
+begin
+  if AObject = nil then
+    Exit;
+  if AObject.ClassInfo = nil then
+    raise EJsonException.CreateResFmt(@RsMissingClassInfo, [AObject.ClassName]);
+
+  Count := GetPropList(AObject, PropList);
+  if Count > 0 then
+  begin
+    try
+      for Index := 0 to Count - 1 do
+      begin
+        if (PropList[Index].StoredProc = Pointer($1)) or IsStoredProp(AObject, PropList[Index]) then
+        begin
+          PropName := UTF8ToString(PropList[Index].Name);
+          if not ACaseSensitive then
+            Item := FindCaseInsensitiveItem(PropName)
+          else if not FindItem(PropName, Item) then
+            Item := nil;
+
+          if Item <> nil then
+          begin
+            case PropList[Index].PropType^.Kind of
+              tkInteger, tkChar, tkWChar:
+                SetOrdProp(AObject, PropList[Index], Item.IntValue);
+
+              tkEnumeration:
+                SetOrdProp(AObject, PropList[Index], Item.IntValue);
+
+              tkFloat:
+                begin
+                  PropType := PropList[Index].PropType^;
+                  if (PropType = TypeInfo(TDateTime)) or (PropType = TypeInfo(TDate)) or (PropType = TypeInfo(TTime)) then
+                    SetFloatProp(AObject, PropList[Index], JSONToDateTime(Item.Value))
+                  else
+                    SetFloatProp(AObject, PropList[Index], Item.FloatValue);
+                end;
+
+              tkInt64:
+                SetInt64Prop(AObject, PropList[Index], Item.LongValue);
+
+              tkString, tkLString, tkWString, tkUString:
+                SetStrProp(AObject, PropList[Index], Item.Value);
+
+              tkSet:
+                SetSetProp(AObject, PropList[Index], Item.Value);
+
+              tkVariant:
+                begin
+                  case Types[PropName] of
+                    jdtObject, jdtArray:
+                      V := Null;
+                    jdtInt:
+                      V := Item.IntValue;
+                    jdtLong:
+                      V := Item.LongValue;
+                    jdtFloat:
+                      V := Item.FloatValue;
+                    jdtBool:
+                      V := Item.BoolValue;
+                  else
+                    V := Item.Value;
+                  end;
+                  SetVariantProp(AObject, PropList[Index], V);
+                end;
+            end;
+          end;
+        end;
+      end;
+    finally
+      FreeMem(PropList);
+    end;
+  end;
+end;
+
+procedure TJsonObject.FromSimpleObject(AObject: TObject);
+var
+  Index, Count: Integer;
+  PropList: PPropList;
+  PropType: PTypeInfo;
+  PropName: string;
+  V: Variant;
+begin
+  Clear;
+  if AObject = nil then
+    Exit;
+  if AObject.ClassInfo = nil then
+    raise EJsonException.CreateResFmt(@RsMissingClassInfo, [AObject.ClassName]);
+
+  Count := GetPropList(AObject, PropList);
+  if Count > 0 then
+  begin
+    try
+      for Index := 0 to Count - 1 do
+      begin
+        if (PropList[Index].StoredProc = Pointer($1)) or IsStoredProp(AObject, PropList[Index]) then
+        begin
+          PropName := UTF8ToString(PropList[Index].Name);
+          case PropList[Index].PropType^.Kind of
+            tkInteger, tkChar, tkWChar:
+              InternAdd(PropName, GetOrdProp(AObject, PropList[Index]));
+
+            tkEnumeration:
+              begin
+                PropType := PropList[Index].PropType^;
+                if (PropType = TypeInfo(Boolean)) or (PropType = TypeInfo(ByteBool)) or
+                   (PropType = TypeInfo(WordBool)) or (PropType = TypeInfo(LongBool)) then
+                  InternAdd(PropName, GetOrdProp(AObject, PropList[Index]) <> 0)
+                else
+                  InternAdd(PropName, GetOrdProp(AObject, PropList[Index]));
+              end;
+
+            tkFloat:
+              begin
+                PropType := PropList[Index].PropType^;
+                if (PropType = TypeInfo(TDateTime)) or (PropType = TypeInfo(TDate)) or (PropType = TypeInfo(TTime)) then
+                  InternAdd(PropName, DateTimeToJSON(GetFloatProp(AObject, PropList[Index]), JsonSerializationConfig.UseUtcTime))
+                else
+                  InternAdd(PropName, GetFloatProp(AObject, PropList[Index]));
+              end;
+
+            tkInt64:
+              InternAdd(PropName, GetInt64Prop(AObject, PropList[Index]));
+
+            tkString, tkLString, tkWString, tkUString:
+              InternAdd(PropName, GetStrProp(AObject, PropList[Index]));
+
+            tkSet:
+              InternAdd(PropName, GetSetProp(AObject, PropList[Index]));
+
+            tkVariant:
+              begin
+                V := GetVariantProp(AObject, PropList[Index]);
+                if VarIsNull(V) or VarIsEmpty(V) then
+                  InternAdd(PropName, TJsonObject(nil))
+                else
+                begin
+                  case VarType(V) and varTypeMask of
+                    varSingle, varDouble, varCurrency:
+                      InternAdd(PropName, Double(V));
+                    varShortInt, varSmallint, varInteger, varByte, varWord:
+                      InternAdd(PropName, Integer(V));
+                    varLongWord:
+                      InternAdd(PropName, Int64(LongWord(V)));
+                    {$IF CompilerVersion >= 23.0} // XE2+
+                    varInt64:
+                      InternAdd(PropName, Int64(V));
+                    {$IFEND}
+                    varBoolean:
+                      InternAdd(PropName, Boolean(V));
+                  else
+                    InternAdd(PropName, VarToStr(V));
+                  end;
+                end;
+              end;
+          end;
+        end;
+      end;
+    finally
+      FreeMem(PropList);
+    end;
+  end;
+end;
+
+function TJsonObject.FindCaseInsensitiveItem(const ACaseInsensitiveName: string): PJsonDataValue;
+var
+  I: Integer;
+begin
+  for I := 0 to Count - 1 do
+  begin
+    if AnsiSameText(FNames[I], ACaseInsensitiveName) then
+    begin
+      Result := @FItems[I];
+      Exit;
+    end;
+  end;
+  Result := nil;
+end;
+
+procedure TJsonObject.Assign(ASource: TJsonObject);
+var
+  I: Integer;
+begin
+  Clear;
+  if ASource <> nil then
+  begin
+    FCapacity := ASource.Count;
+    InternApplyCapacity;
+
+    FCount := ASource.Count;
+    for I := 0 to ASource.Count - 1 do
+    begin
+      Pointer(FNames[I]) := nil;
+      {$IFDEF USE_NAME_STRING_LITERAL}
+      AsgString(FNames[I], ASource.FNames[I]);
+      {$ELSE}
+      FNames[I] := ASource.FNames[I];
+      {$ENDIF USE_NAME_STRING_LITERAL}
+      InternInitAndAssignItem(@FItems[I], @ASource.FItems[I]);
+    end;
+  end
+  else
+  begin
+    FreeMem(FItems);
+    FreeMem(FNames);
+    FCapacity := 0;
+  end;
+end;
+
+{$IFDEF USE_STRINGINTERN_FOR_NAMES}
+{ TStringIntern }
+
+procedure TStringIntern.Init;
+begin
+  FCount := 0;
+  FCapacity := 16;
+  GetMem(FStrings, FCapacity * SizeOf(FStrings[0]));
+  FCapacity := 17;
+  GetMem(FBuckets, FCapacity * SizeOf(FBuckets[0]));
+  FillChar(FBuckets[0], FCapacity * SizeOf(FBuckets[0]), $FF);
+end;
+
+procedure TStringIntern.Done;
+var
+  I: Integer;
+begin
+  for I := 0 to FCount - 1 do
+    FStrings[I].Name := '';
+  FreeMem(FStrings);
+  FreeMem(FBuckets);
+end;
+
+procedure TStringIntern.Intern(var S: string; var PropName: string);
+var
+  Index: Integer;
+  Hash: Integer;
+  {$IFDEF USE_FAST_STRASG_FOR_INTERNAL_STRINGS}
+  Source: Pointer;
+  {$ENDIF USE_FAST_STRASG_FOR_INTERNAL_STRINGS}
+begin
+  if PropName <> '' then
+    PropName := ''; // guarantee that Pointer(FPropName) = nil because InternTransfer steals FLook.S and overwrites FPropName
+  if S <> '' then
+  begin
+    Hash := GetHash(S);
+    Index := Find(Hash, S);
+    if Index <> -1 then
+    begin
+      {$IFDEF USE_FAST_STRASG_FOR_INTERNAL_STRINGS}
+      Source := Pointer(FStrings[Index].Name);
+      if Source <> nil then
+      begin
+        {$IFDEF DEBUG}
+        //if PLongInt(@PByte(Source)[-8])^ = -1 then
+        //  InternAsgStringUsageError;
+        {$ENDIF DEBUG}
+        Pointer(PropName) := Source;
+        // We are parsing JSON, no other thread knowns about the string => skip the CPU lock
+        Inc(PLongInt(@PByte(Source)[-8])^);
+      end;
+      {$ELSE}
+      PropName := FStrings[Index].Name;
+      {$ENDIF USE_FAST_STRASG_FOR_INTERNAL_STRINGS}
+      S := '';
+    end
+    else
+    begin
+      // Transfer the string without going through UStrAsg and UStrClr
+      Pointer(PropName) := Pointer(S);
+      Pointer(S) := nil;
+      InternAdd(Hash, PropName);
+    end;
+  end;
+end;
+
+class function TStringIntern.GetHash(const Name: string): Integer;
+var
+  P: PChar;
+  Ch: Word;
+begin
+  // Only used to reduce memory when parsing large JSON strings
+  Result := 0;
+  P := PChar(Pointer(Name));
+  if P <> nil then
+  begin
+    Result := PLongint(@PByte(Name)[-4])^;
+    while True do
+    begin
+      Ch := Word(P[0]);
+      if Ch = 0 then
+        Break;
+      Result := Result + Ch;
+
+      Ch := Word(P[1]);
+      if Ch = 0 then
+        Break;
+      Result := Result + Ch;
+
+      Ch := Word(P[2]);
+      if Ch = 0 then
+        Break;
+      Result := Result + Ch;
+
+      Ch := Word(P[3]);
+      if Ch = 0 then
+        Break;
+      Result := Result + Ch;
+
+      Result := (Result shl 6) or ((Result shr 26) and $3F);
+      Inc(P, 4);
+    end;
+  end;
+end;
+
+procedure TStringIntern.InternAdd(AHash: Integer; const S: string);
+var
+  Index: Integer;
+  Bucket: PInteger;
+begin
+  if FCount = FCapacity then
+    Grow;
+  Index := FCount;
+  Inc(FCount);
+
+  Bucket := @FBuckets[(AHash and $7FFFFFFF) mod FCapacity];
+  with FStrings[Index] do
+  begin
+    Next := Bucket^;
+    Hash := AHash;
+    Pointer(Name) := Pointer(S);
+    Inc(PLongint(@PByte(Name)[-8])^);
+  end;
+  Bucket^ := Index;
+end;
+
+procedure TStringIntern.Grow;
+var
+  I: Integer;
+  Index: Integer;
+  Len: Integer;
+begin
+  Len := FCapacity;
+  // Some prime numbers
+  case Len of
+      17: Len := 37;
+      37: Len := 59;
+      59: Len := 83;
+      83: Len := 127;
+     127: Len := 353;
+     353: Len := 739;
+     739: Len := 1597;
+    1597: Len := 2221;
+  else
+    Len := Len * 2 + 1;
+  end;
+  FCapacity := Len;
+
+  ReallocMem(FStrings, Len * SizeOf(FStrings[0]));
+  ReallocMem(FBuckets, Len * SizeOf(FBuckets[0]));
+  FillChar(FBuckets[0], Len * SizeOf(FBuckets[0]), $FF);
+
+  // Rehash
+  for I := 0 to FCount - 1 do
+  begin
+    Index := (FStrings[I].Hash and $7FFFFFFF) mod Len;
+    FStrings[I].Next := FBuckets[Index];
+    FBuckets[Index] := I;
+  end;
+end;
+
+function TStringIntern.Find(Hash: Integer; const S: string): Integer;
+var
+  Strs: PJsonStringEntryArray;
+begin
+  Result := -1;
+  if FCount <> 0 then
+  begin
+    Result := FBuckets[(Hash and $7FFFFFFF) mod FCapacity];
+    if Result <> -1 then
+    begin
+      Strs := FStrings;
+      while True do
+      begin
+        if (Strs[Result].Hash = Hash) and (Strs[Result].Name = S) then
+          Break;
+        Result := Strs[Result].Next;
+        if Result = -1 then
+          Break;
+      end;
+    end;
+  end;
+end;
+{$ENDIF USE_STRINGINTERN_FOR_NAMES}
+
+{ TJsonOutputWriter }
+
+procedure TJsonOutputWriter.Init(ACompact: Boolean; AStream: TStream; AEncoding: TEncoding; ALines: TStrings);
+begin
+  FStream := AStream;
+  FEncoding := AEncoding;
+  if ACompact then
+  begin
+    FStringBufferMode := True;
+    {$IFDEF USE_JSONSTRINGBUILDER}
+    FStringBuffer.Init;
+    {$ELSE}
+    FStringBuffer := '';
+    {$ENDIF USE_JSONSTRINGBUILDER}
+    FLines := nil;
+    FLastLine := '';
+  end
+  else
+  begin
+    FStringBufferMode := False;
+    FLastLine := '';
+    FLinesBufferLen := 0;
+    if ALines <> nil then
+    begin
+      FLines := ALines;
+      FLineBreakLen := Length(FLines.LineBreak);
+    end
+    else
+    begin
+      FLines := TStringList.Create;
+      FLines.LineBreak := JsonSerializationConfig.LineBreak;
+      FLineBreakLen := Length(JsonSerializationConfig.LineBreak);
+    end;
+    FIndent := 0;
+    FLastType := ltInitial;
+
+    // setup some initial indention levels
+    SetLength(FIndents, 5);
+    FIndents[0] := '';
+    FIndents[1] := JsonSerializationConfig.IndentChar;
+    FIndents[2] := FIndents[1] + JsonSerializationConfig.IndentChar;
+    FIndents[3] := FIndents[2] + JsonSerializationConfig.IndentChar;
+    FIndents[4] := FIndents[3] + JsonSerializationConfig.IndentChar;
+  end;
+end;
+
+function TJsonOutputWriter.Done: string;
+begin
+  if FStringBufferMode then
+  begin
+    {$IFDEF USE_JSONSTRINGBUILDER}
+    FStringBuffer.DoneToString(Result);
+    {$ELSE}
+    Result := FStringBuffer;
+    FStringBuffer := '';
+    {$ENDIF USE_JSONSTRINGBUILDER}
+  end
+  else
+  begin
+    FlushLastLine;
+    Result := FLines.Text;
+    FLines.Free;
+    FIndents := nil;
+  end;
+end;
+
+procedure TJsonOutputWriter.LinesDone;
+begin
+  FIndents := nil;
+  FlushLastLine;
+  FLastLine := '';
+end;
+
+procedure TJsonOutputWriter.StreamDone;
+begin
+  if FStream <> nil then
+  begin
+    if FLines <> nil then
+      FlushLastLine;
+    StreamFlush;
+  end;
+
+  if FStringBufferMode then
+  begin
+    {$IFDEF USE_JSONSTRINGBUILDER}
+    FStringBuffer.Done;
+    {$ELSE}
+    FStringBuffer := '';
+    {$ENDIF USE_JSONSTRINGBUILDER}
+  end
+  else
+  begin
+    FLines.Free;
+    FIndents := nil;
+  end;
+end;
+
+procedure TJsonOutputWriter.FlushLastLine;
+begin
+  if FLastLine <> '' then
+  begin
+    FLines.Add(FLastLine);
+    Inc(FLinesBufferLen, Length(FLastLine) + FLineBreakLen);
+    FLastLine := '';
+  end;
+end;
+
+type
+  TStringBuilderAccess = class(TStringBuilder);
+
+procedure TJsonOutputWriter.StreamFlush;
+var
+  Bytes: TBytes;
+begin
+  if FStringBufferMode then
+  begin
+    {$IFDEF USE_JSONSTRINGBUILDER}
+    FStringBuffer.FlushToBytes(Bytes, FEncoding);
+    {$ELSE}
+    Bytes := FEncoding.GetBytes(FStringBuffer);
+    FStringBuffer := '';
+    {$ENDIF USE_JSONSTRINGBUILDER}
+  end
+  else
+  begin
+    Bytes := FEncoding.GetBytes(FLines.Text);
+    FLines.Clear;
+    FLinesBufferLen := 0;
+  end;
+  if Bytes <> nil then
+    FStream.Write(Bytes[0], Length(Bytes));
+end;
+
+procedure TJsonOutputWriter.StreamFlushPossible;
+const
+  MaxBuffer = 64 * 1024;
+begin
+  if FStream <> nil then
+  begin
+    if FStringBufferMode then
+    begin
+      {$IFDEF USE_JSONSTRINGBUILDER}
+      if FStringBuffer.Len >= MaxBuffer then
+      {$ELSE}
+      if Length(FStringBuffer) >= MaxBuffer then
+      {$ENDIF USE_JSONSTRINGBUILDER}
+        StreamFlush;
+    end
+    else
+    begin
+      if FLinesBufferLen >= MaxBuffer then
+        StreamFlush;
+    end;
+  end;
+end;
+
+procedure TJsonOutputWriter.ExpandIndents;
+begin
+  SetLength(FIndents, Length(FIndents) + 1);
+  FIndents[FIndent] := FIndents[FIndent - 1] + JsonSerializationConfig.IndentChar;
+end;
+
+procedure TJsonOutputWriter.AppendLine(AppendOn: TLastType; const S: string);
+begin
+  if FLastType = AppendOn then
+    FLastLine := FLastLine + S
+  else
+  begin
+    FlushLastLine;
+    StreamFlushPossible;
+    FLastLine := FIndents[FIndent] + S;
+  end;
+end;
+
+procedure TJsonOutputWriter.Indent(const S: string);
+begin
+  if FStringBufferMode then
+  begin
+    {$IFDEF USE_JSONSTRINGBUILDER}
+    FStringBuffer.Append(S);
+    {$ELSE}
+    FStringBuffer := FStringBuffer + S;
+    {$ENDIF USE_JSONSTRINGBUILDER}
+    StreamFlushPossible;
+  end
+  else
+  begin
+    AppendLine(ltIntro, S);
+    Inc(FIndent);
+    if FIndent >= Length(FIndents) then // this is a new indention level
+      ExpandIndents;
+    FLastType := ltIndent;
+  end;
+end;
+
+procedure TJsonOutputWriter.Unindent(const S: string);
+begin
+  if FStringBufferMode then
+  begin
+    {$IFDEF USE_JSONSTRINGBUILDER}
+    FStringBuffer.Append(S);
+    {$ELSE}
+    FStringBuffer := FStringBuffer + S;
+    {$ENDIF USE_JSONSTRINGBUILDER}
+    StreamFlushPossible;
+  end
+  else
+  begin
+    Dec(FIndent);
+    //Assert(FIndent >= 0);
+    AppendLine(ltIndent, S);
+    FLastType := ltUnindent;
+  end;
+end;
+
+procedure TJsonOutputWriter.AppendIntro(const S: string);
+const
+  sQuoteCharColon = '":';
+begin
+  if FStringBufferMode then
+  begin
+    {$IFDEF USE_JSONSTRINGBUILDER}
+    FStringBuffer.Append3(sQuoteChar, S, sQuoteCharColon);
+    {$ELSE}
+    FStringBuffer := FStringBuffer + sQuoteChar + S + sQuoteCharColon;
+    {$ENDIF USE_JSONSTRINGBUILDER}
+    StreamFlushPossible;
+  end
+  else
+  begin
+    FlushLastLine;
+    StreamFlushPossible;
+    FLastLine := FIndents[FIndent] + sQuoteChar + S + '": ';
+    FLastType := ltIntro;
+  end;
+end;
+
+procedure TJsonOutputWriter.AppendValue(const S: string);
+begin
+  if FStringBufferMode then
+  begin
+    {$IFDEF USE_JSONSTRINGBUILDER}
+    FStringBuffer.Append(S);
+    {$ELSE}
+    FStringBuffer := FStringBuffer + S;
+    {$ENDIF USE_JSONSTRINGBUILDER}
+    StreamFlushPossible;
+  end
+  else
+  begin
+    AppendLine(ltIntro, S);
+    FLastType := ltValue;
+  end;
+end;
+
+procedure TJsonOutputWriter.AppendStrValue(const S: string);
+begin
+  if FStringBufferMode then
+  begin
+    {$IFDEF USE_JSONSTRINGBUILDER}
+    FStringBuffer.Append3(sQuoteChar, S, sQuoteChar);
+    {$ELSE}
+    FStringBuffer := FStringBuffer + sQuoteChar + S + sQuoteChar;
+    {$ENDIF USE_JSONSTRINGBUILDER}
+    StreamFlushPossible;
+  end
+  else
+  begin
+    if FLastType = ltIntro then
+      FLastLine := FLastLine + sQuoteChar + S + sQuoteChar
+    else
+    begin
+      FlushLastLine;
+      StreamFlushPossible;
+      FLastLine := FIndents[FIndent] + sQuoteChar + S + sQuoteChar;
+    end;
+    FLastType := ltValue;
+  end;
+end;
+
+procedure TJsonOutputWriter.AppendSeparator(const S: string);
+begin
+  if FStringBufferMode then
+  begin
+    {$IFDEF USE_JSONSTRINGBUILDER}
+    FStringBuffer.Append(S);
+    {$ELSE}
+    FStringBuffer := FStringBuffer + S;
+    {$ENDIF USE_JSONSTRINGBUILDER}
+    StreamFlushPossible;
+  end
+  else
+  begin
+    if FLastType in [ltValue, ltUnindent] then
+      FLastLine := FLastLine + S
+    else
+    begin
+      FlushLastLine;
+      StreamFlushPossible;
+      FLastLine := FIndents[FIndent] + S;
+    end;
+    FLastType := ltSeparator;
+  end;
+end;
+
+{ TUtf8JsonReader }
+
+constructor TUtf8JsonReader.Create(S: PByte; Len: Integer);
+begin
+  inherited Create;
+  FText := S;
+  FTextEnd := S + Len;
+end;
+
+function TUtf8JsonReader.Next: Boolean;
+var
+  P, EndP: PByte;
+begin
+  P := FText;
+  EndP := FTextEnd;
+  while (P < EndP) and (P^ <= 32) do
+    Inc(P);
+
+  if P < EndP then
+  begin
+    case P^ of
+      Ord('{'):
+        begin
+          FLook.Kind := jtkLBrace;
+          FText := P + 1;
+        end;
+      Ord('}'):
+        begin
+          FLook.Kind := jtkRBrace;
+          FText := P + 1;
+        end;
+      Ord('['):
+        begin
+          FLook.Kind := jtkLBracket;
+          FText := P + 1;
+        end;
+      Ord(']'):
+        begin
+          FLook.Kind := jtkRBracket;
+          FText := P + 1;
+        end;
+      Ord(':'):
+        begin
+          FLook.Kind := jtkColon;
+          FText := P + 1;
+        end;
+      Ord(','):
+        begin
+          FLook.Kind := jtkComma;
+          FText := P + 1;
+        end;
+      Ord('"'): // String
+        LexString(P{$IFDEF CPUARM}, EndP{$ENDIF});
+      Ord('-'), Ord('0')..Ord('9'), Ord('.'): // Number
+        LexNumber(P{$IFDEF CPUARM}, EndP{$ENDIF});
+    else
+      LexIdent(P{$IFDEF CPUARM}, EndP{$ENDIF}); // Ident/Bool/NULL
+    end;
+    Result := True;
+  end
+  else
+  begin
+    FText := EndP;
+    FLook.Kind := jtkEof;
+    Result := False;
+  end;
+end;
+
+procedure TUtf8JsonReader.LexString(P: PByte{$IFDEF CPUARM}; EndP: PByte{$ENDIF});
+var
+  {$IFNDEF CPUARM}
+  EndP: PByte;
+  {$ENDIF ~CPUARM}
+  EscapeSequences: PByte;
+  Ch: Byte;
+  Idx: Integer;
+begin
+  Inc(P); // skip initiating '"'
+  {$IFNDEF CPUARM}
+  EndP := FTextEnd;
+  {$ENDIF ~CPUARM}
+  EscapeSequences := nil;
+  Ch := 0;
+  Idx := P - EndP;
+
+  // find the string end
+  repeat
+    if Idx = 0 then
+      Break;
+    Ch := EndP[Idx];
+    if Ch = Byte(Ord('"')) then
+      Break;
+    Inc(Idx);
+    if Ch <> Byte(Ord('\')) then
+      Continue;
+    if Idx = 0 then // Eof reached in an escaped char => broken JSON string
+      Break;
+    if EscapeSequences = nil then
+      EscapeSequences := @EndP[Idx];
+    Inc(Idx);
+  until False;
+
+  EndP := @EndP[Idx];
+  if EscapeSequences = nil then
+    SetStringUtf8(FLook.S, P, EndP - P)
+  else
+    TJsonBaseObject.JSONUtf8StrToStr(P, EndP, EscapeSequences - P, FLook.S);
+
+  if Ch = Byte(Ord('"')) then
+    Inc(EndP);
+  FLook.Kind := jtkString;
+  FText := EndP;
+end;
+
+{$IFDEF CPUX64}
+function ParseInt64Utf8(P, EndP: PByte): Int64;
+// RCX = P
+// RDX = EndP
+asm
+  cmp rcx, rdx
+  jge @@LeaveFail
+
+  mov r8, rdx
+  sub rcx, r8
+  // r8+rcx = EndP + NegOffset = P => NegOffset can be incremented and checked for zero
+
+  movzx rax, BYTE PTR [r8+rcx]
+  sub al, '0'
+  add rcx, 1
+  jz @@Leave
+
+@@Loop:
+  add rax, rax
+  // rax = 2*Result
+  lea rax, [rax+rax*4]
+  // rax = (2*Result)*4 + (2*Result) = 10*Result
+
+  movzx rdx, BYTE PTR [r8+rcx]
+  sub dl, '0'
+  add rax, rdx
+
+  add rcx, 1
+  jnz @@Loop
+
+@@Leave:
+  ret
+@@LeaveFail:
+  xor rax, rax
+end;
+{$ELSE}
+  {$IFDEF CPUX86}
+function ParseInt64Utf8(P, EndP: PByte): Int64;
+asm
+  cmp eax, edx
+  jge @@LeaveFail
+
+  push esi
+  push edi
+  push ebx
+
+  mov esi, edx
+  mov edi, eax
+  sub edi, edx
+  // esi+edi = EndP + NegOffset = P => NegOffset can be incremented and checked for zero
+
+  xor edx, edx
+  movzx eax, BYTE PTR [esi+edi]
+  sub al, '0'
+  add edi, 1
+  jz @@PopLeave
+
+@@Loop:
+  add eax, eax
+  adc edx, edx
+  // eax:edx = 2*Result
+  mov ebx, eax
+  mov ecx, edx
+  // ebx:ecx = 2*Result
+  shld edx, eax, 2
+  shl eax, 2
+  // eax:edx = (2*Result)*4
+  add eax, ebx
+  adc edx, ecx
+  // eax:edx = (2*Result)*4 + (2*Result) = 10*Result
+
+  movzx ecx, BYTE PTR [esi+edi]
+  sub cl, '0'
+  add eax, ecx
+  adc edx, 0
+
+  add edi, 1
+  jnz @@Loop
+
+@@PopLeave:
+  pop ebx
+  pop edi
+  pop esi
+@@Leave:
+  ret
+@@LeaveFail:
+  xor eax, eax
+  xor edx, edx
+end;
+  {$ELSE}
+function ParseInt64Utf8(P, EndP: PByte): Int64;
+begin
+  if P = EndP then
+    Result := 0
+  else
+  begin
+    Result := P^ - Byte(Ord('0'));
+    Inc(P);
+    while P < EndP do
+    begin
+      Result := Result * 10 + (P^ - Byte(Ord('0')));
+      Inc(P);
+    end;
+  end;
+end;
+  {$ENDIF CPUX86}
+{$ENDIF CPUX64}
+
+procedure TUtf8JsonReader.LexNumber(P: PByte{$IFDEF CPUARM}; EndP: PByte{$ENDIF});
+var
+  F: PByte;
+  {$IFNDEF CPUARM}
+  EndP: PByte;
+  {$ENDIF ~CPUARM}
+  EndInt64P: PByte;
+  Ch: Byte;
+  Value, Scale: Double;
+  Exponent, IntValue: Integer;
+  Neg, NegE: Boolean;
+begin
+  {$IFNDEF CPUARM}
+  EndP := FTextEnd;
+  {$ENDIF ~CPUARM}
+  Neg := False;
+
+  Ch := P^;
+  if Ch = Byte(Ord('-')) then
+  begin
+    Inc(P);
+    if P >= EndP then
+    begin
+      FLook.Kind := jtkInvalidSymbol;
+      FText := P;
+      Exit;
+    end;
+    Neg := True;
+    Ch := P^;
+  end;
+  F := P;
+
+  Inc(P);
+  if Ch <> Byte(Ord('0')) then
+  begin
+    if Ch in [Ord('1')..Ord('9')] then
+    begin
+      while (P < EndP) and (P^ in [Ord('0')..Ord('9')]) do
+        Inc(P);
+    end
+    else
+    begin
+      FLook.Kind := jtkInvalidSymbol;
+      FText := P;
+      Exit;
+    end;
+  end;
+
+  if P - F <= 9 then // Int32 fits 9 digits
+  begin
+    IntValue := 0;
+    while F < P do
+    begin
+      IntValue := IntValue * 10 + (F^ - Byte(Ord('0')));
+      Inc(F);
+    end;
+    FLook.HI := 0;
+    FLook.I := IntValue;
+    FLook.Kind := jtkInt;
+    if not (P^ in [Ord('.'), Ord('E'), Ord('e')]) then
+    begin
+      // just an integer
+      if Neg then
+        FLook.I := -FLook.I;
+      FText := P;
+      Exit;
+    end;
+    Value := FLook.I;
+  end
+  else if P - F <= 19 then // Int64 fits 19 digits
+  begin
+    FLook.L := ParseInt64Utf8(F, P);
+    FLook.Kind := jtkInt; // the lexer doesn't know jtkLong
+    if not (P^ in [Ord('.'), Ord('E'), Ord('e')]) then
+    begin
+      // just an integer
+      if Neg then
+      begin
+        if FLook.HI = 0 then // 32bit Integer
+          FLook.I := -FLook.I
+        else                 // 64bit Integer
+          FLook.L := -FLook.L;
+      end;
+      FText := P;
+      Exit;
+    end;
+    Value := FLook.L;
+  end
+  else
+  begin
+    Value := 0.0;
+    while F < P do
+    begin
+      Value := Value * 10 + (F^ - Byte(Ord('0')));
+      Inc(F);
+    end;
+  end;
+
+  // decimal digits
+  if (P + 1 < EndP) and (P^ = Byte(Ord('.'))) then
+  begin
+    Inc(P);
+    F := P;
+    EndInt64P := F + 18;
+    if EndInt64P > EndP then
+      EndInt64P := EndP;
+    while (P < EndInt64P) and (P^ in [Ord('0')..Ord('9')]) do
+      Inc(P);
+    Value := Value + ParseInt64Utf8(F, P) / Power10[P - F];
+
+    // "Double" can't handle that many digits
+    while (P < EndP) and (P^ in [Ord('0')..Ord('9')]) do
+      Inc(P);
+  end;
+
+  // exponent
+  if (P < EndP) and (P^ in [Ord('e'), Ord('E')]) then
+  begin
+    Inc(P);
+    NegE := False;
+    if (P < EndP) then
+    begin
+      case P^ of
+        Ord('-'):
+          begin
+            NegE := True;
+            Inc(P);
+          end;
+        Ord('+'):
+          Inc(P);
+      end;
+      Exponent := 0;
+      F := P;
+      while (P < EndP) and (P^ in [Ord('0')..Ord('9')]) do
+      begin
+        Exponent := Exponent * 10 + (P^ - Byte(Ord('0')));
+        Inc(P);
+      end;
+      if P = F then
+      begin
+        // no exponent
+        FLook.Kind := jtkInvalidSymbol;
+        FText := P;
+        Exit;
+      end;
+
+      if Exponent > 308 then
+        Exponent := 308;
+
+      Scale := 1.0;
+      while Exponent >= 50 do
+      begin
+        Scale := Scale * 1E50;
+        Dec(Exponent, 50);
+      end;
+      while Exponent >= 18 do
+      begin
+        Scale := Scale * 1E18;
+        Dec(Exponent, 18);
+      end;
+      Scale := Scale * Power10[Exponent];
+
+      if NegE then
+        Value := Value / Scale
+      else
+        Value := Value * Scale;
+    end
+    else
+    begin
+      FLook.Kind := jtkInvalidSymbol;
+      FText := P;
+      Exit;
+    end;
+  end;
+
+  if Neg then
+    FLook.F := -Value
+  else
+    FLook.F := Value;
+  FLook.Kind := jtkFloat;
+  FText := P;
+end;
+
+procedure TUtf8JsonReader.LexIdent(P: PByte{$IFDEF CPUARM}; EndP: PByte{$ENDIF});
+const
+  {$IFDEF BIGENDIAN}
+  // Big Endian
+  NullStr = LongWord((Ord('n') shl 24) or (Ord('u') shl 16) or (Ord('l') shl 8) or Ord('l'));
+  TrueStr = LongWord((Ord('t') shl 24) or (Ord('r') shl 16) or (Ord('u') shl 8) or Ord('e'));
+  FalseStr = LongWord((Ord('a') shl 24) or (Ord('l') shl 16) or (Ord('s') shl 8) or Ord('e'));
+  {$ELSE}
+  // Little Endian
+  NullStr = LongWord(Ord('n') or (Ord('u') shl 8) or (Ord('l') shl 16) or (Ord('l') shl 24));
+  TrueStr = LongWord(Ord('t') or (Ord('r') shl 8) or (Ord('u') shl 16) or (Ord('e') shl 24));
+  FalseStr = LongWord(Ord('a') or (Ord('l') shl 8) or (Ord('s') shl 16) or (Ord('e') shl 24));
+  {$ENDIF BIGENDIAN}
+var
+  F: PByte;
+  {$IFNDEF CPUARM}
+  EndP: PByte;
+  {$ENDIF ~CPUARM}
+  L: LongWord;
+begin
+  F := P;
+  {$IFNDEF CPUARM}
+  EndP := FTextEnd;
+  {$ENDIF ~CPUARM}
+  case P^ of
+    Ord('A')..Ord('Z'), Ord('a')..Ord('z'), Ord('_'), Ord('$'):
+      begin
+        Inc(P);
+        while (P < EndP) and (P^ in [Ord('A')..Ord('Z'), Ord('a')..Ord('z'), Ord('_'), Ord('0')..Ord('9')]) do
+          Inc(P);
+        L := P - F;
+        if L = 4 then
+        begin
+          L := PLongWord(F)^;
+          if L = NullStr then
+            FLook.Kind := jtkNull
+          else if L = TrueStr then
+            FLook.Kind := jtkTrue
+          else
+          begin
+            SetStringUtf8(FLook.S, F, P - F);
+            FLook.Kind := jtkIdent;
+          end;
+        end
+        else if (L = 5) and (F^ = Ord('f')) and (PLongWord(F + 1)^ = FalseStr) then
+          FLook.Kind := jtkFalse
+        else
+        begin
+          SetStringUtf8(FLook.S, F, P - F);
+          FLook.Kind := jtkIdent;
+        end;
+      end;
+  else
+    FLook.Kind := jtkInvalidSymbol;
+    Inc(P);
+  end;
+  FText := P;
+end;
+
+{ TStringJsonReader }
+
+constructor TStringJsonReader.Create(const S: PChar; Len: Integer);
+begin
+  inherited Create;
+  FText := S;
+  FTextEnd := S + Len;
+end;
+
+function TStringJsonReader.Next: Boolean;
+var
+  P, EndP: PChar;
+begin
+  P := FText;
+  EndP := FTextEnd;
+  while (P < EndP) and (P^ <= #32) do
+    Inc(P);
+
+  if P < EndP then
+  begin
+    case P^ of
+      '{':
+        begin
+          FLook.Kind := jtkLBrace;
+          FText := P + 1;
+        end;
+      '}':
+        begin
+          FLook.Kind := jtkRBrace;
+          FText := P + 1;
+        end;
+      '[':
+        begin
+          FLook.Kind := jtkLBracket;
+          FText := P + 1;
+        end;
+      ']':
+        begin
+          FLook.Kind := jtkRBracket;
+          FText := P + 1;
+        end;
+      ':':
+        begin
+          FLook.Kind := jtkColon;
+          FText := P + 1;
+        end;
+      ',':
+        begin
+          FLook.Kind := jtkComma;
+          FText := P + 1;
+        end;
+      '"': // String
+        LexString(P{$IFDEF CPUARM}, EndP{$ENDIF});
+      '-', '0'..'9', '.': // Number
+        LexNumber(P{$IFDEF CPUARM}, EndP{$ENDIF});
+    else
+      LexIdent(P{$IFDEF CPUARM}, EndP{$ENDIF}); // Ident/Bool/NULL
+    end;
+    Result := True;
+  end
+  else
+  begin
+    FText := EndP;
+    FLook.Kind := jtkEof;
+    Result := False;
+  end;
+end;
+
+procedure TStringJsonReader.LexString(P: PChar{$IFDEF CPUARM}; EndP: PChar{$ENDIF});
+var
+  {$IFNDEF CPUARM}
+  EndP: PChar;
+  {$ENDIF ~CPUARM}
+  EscapeSequences: PChar;
+  Ch: Char;
+  Idx: Integer;
+begin
+  Inc(P); // skip initiating '"'
+  {$IFNDEF CPUARM}
+  EndP := FTextEnd;
+  {$ENDIF ~CPUARM}
+  EscapeSequences := nil;
+  Ch := #0;
+  Idx := P - EndP;
+
+  // find the string end
+  repeat
+    if Idx = 0 then
+      Break;
+    Ch := EndP[Idx];
+    if Ch = '"' then
+      Break;
+    Inc(Idx);
+    if Ch <> '\' then
+      Continue;
+    if Idx = 0 then // Eof reached in an escaped char => broken JSON string
+      Break;
+    if EscapeSequences = nil then
+      EscapeSequences := @EndP[Idx];
+    Inc(Idx);
+  until False;
+
+  EndP := @EndP[Idx];
+  if EscapeSequences = nil then
+    SetString(FLook.S, P, EndP - P)
+  else
+    TJsonBaseObject.JSONStrToStr(P, EndP, EscapeSequences - P, FLook.S);
+
+  if Ch = '"' then
+    Inc(EndP);
+  FLook.Kind := jtkString;
+  FText := EndP;
+end;
+
+{$IFDEF CPUX64}
+function ParseInt64(P, EndP: PWideChar): Int64;
+// RCX = P
+// RDX = EndP
+asm
+  cmp rcx, rdx
+  jge @@LeaveFail
+
+  mov r8, rdx
+  sub rcx, r8
+  // r8+rcx = EndP + NegOffset = P => NegOffset can be incremented and checked for zero
+
+  movzx rax, WORD PTR [r8+rcx]
+  sub ax, '0'
+  add rcx, 2
+  jz @@Leave
+
+@@Loop:
+  add rax, rax
+  // rax = 2*Result
+  lea rax, [rax+rax*4]
+  // rax = (2*Result)*4 + (2*Result) = 10*Result
+
+  movzx rdx, WORD PTR [r8+rcx]
+  sub dx, '0'
+  add rax, rdx
+
+  add rcx, 2
+  jnz @@Loop
+
+@@Leave:
+  ret
+@@LeaveFail:
+  xor rax, rax
+end;
+{$ELSE}
+  {$IFDEF CPUX86}
+function ParseInt64(P, EndP: PWideChar): Int64;
+asm
+  cmp eax, edx
+  jge @@LeaveFail
+
+  push esi
+  push edi
+  push ebx
+
+  mov esi, edx
+  mov edi, eax
+  sub edi, edx
+  // esi+edi = EndP + NegOffset = P => NegOffset can be incremented and checked for zero
+
+  xor edx, edx
+  movzx eax, WORD PTR [esi+edi]
+  sub ax, '0'
+  add edi, 2
+  jz @@PopLeave
+
+@@Loop:
+  add eax, eax
+  adc edx, edx
+  // eax:edx = 2*Result
+  mov ebx, eax
+  mov ecx, edx
+  // ebx:ecx = 2*Result
+  shld edx, eax, 2
+  shl eax, 2
+  // eax:edx = (2*Result)*4
+  add eax, ebx
+  adc edx, ecx
+  // eax:edx = (2*Result)*4 + (2*Result) = 10*Result
+
+  movzx ecx, WORD PTR [esi+edi]
+  sub cx, '0'
+  add eax, ecx
+  adc edx, 0
+
+  add edi, 2
+  jnz @@Loop
+
+@@PopLeave:
+  pop ebx
+  pop edi
+  pop esi
+@@Leave:
+  ret
+@@LeaveFail:
+  xor eax, eax
+  xor edx, edx
+end;
+  {$ELSE}
+function ParseInt64(P, EndP: PWideChar): Int64;
+begin
+  if P = EndP then
+    Result := 0
+  else
+  begin
+    Result := Ord(P^) - Ord('0');
+    Inc(P);
+    while P < EndP do
+    begin
+      Result := Result * 10 + (Ord(P^) - Ord('0'));
+      Inc(P);
+    end;
+  end;
+end;
+  {$ENDIF CPUX86}
+{$ENDIF CPUX64}
+
+procedure TStringJsonReader.LexNumber(P: PChar{$IFDEF CPUARM}; EndP: PChar{$ENDIF});
+var
+  F: PChar;
+  {$IFNDEF CPUARM}
+  EndP: PChar;
+  {$ENDIF ~CPUARM}
+  EndInt64P: PChar;
+  Ch: Char;
+  Value, Scale: Double;
+  Exponent, IntValue: Integer;
+  Neg, NegE: Boolean;
+begin
+  {$IFNDEF CPUARM}
+  EndP := FTextEnd;
+  {$ENDIF ~CPUARM}
+  Neg := False;
+
+  Ch := P^;
+  if Ch = '-' then
+  begin
+    Inc(P);
+    if P >= EndP then
+    begin
+      FLook.Kind := jtkInvalidSymbol;
+      FText := P;
+      Exit;
+    end;
+    Neg := True;
+    Ch := P^;
+  end;
+  F := P;
+
+  Inc(P);
+  if Ch <> '0' then
+  begin
+    if Ch in ['1'..'9'] then
+    begin
+      while (P < EndP) and (P^ in ['0'..'9']) do
+        Inc(P);
+    end
+    else
+    begin
+      FLook.Kind := jtkInvalidSymbol;
+      FText := P;
+      Exit;
+    end;
+  end;
+
+  if P - F <= 9 then // Int32 fits 9 digits
+  begin
+    IntValue := 0;
+    while F < P do
+    begin
+      IntValue := IntValue * 10 + (Ord(F^) - Ord('0'));
+      Inc(F);
+    end;
+    FLook.HI := 0;
+    FLook.I := IntValue;
+    FLook.Kind := jtkInt;
+    if not (P^ in ['.', 'E', 'e']) then
+    begin
+      // just an integer
+      if Neg then
+        FLook.I := -FLook.I;
+      FText := P;
+      Exit;
+    end;
+    Value := FLook.I;
+  end
+  else if P - F <= 19 then // Int64 fits 19 digits
+  begin
+    FLook.L := ParseInt64(F, P);
+    FLook.Kind := jtkInt; // the lexer doesn't know jtkLong
+    if not (P^ in ['.', 'E', 'e']) then
+    begin
+      // just an integer
+      if Neg then
+      begin
+        if FLook.HI = 0 then // 32bit Integer
+          FLook.I := -FLook.I
+        else                 // 64bit Integer
+          FLook.L := -FLook.L;
+      end;
+      FText := P;
+      Exit;
+    end;
+    Value := FLook.L;
+  end
+  else
+  begin
+    Value := 0.0;
+    while F < P do
+    begin
+      Value := Value * 10 + (Ord(F^) - Ord('0'));
+      Inc(F);
+    end;
+  end;
+
+  // decimal digits
+  if (P + 1 < EndP) and (P^ = '.') then
+  begin
+    Inc(P);
+    F := P;
+    EndInt64P := F + 18;
+    if EndInt64P > EndP then
+      EndInt64P := EndP;
+    while (P < EndInt64P) and (P^ in ['0'..'9']) do
+      Inc(P);
+    Value := Value + ParseInt64(F, P) / Power10[P - F];
+
+    // "Double" can't handle that many digits
+    while (P < EndP) and (P^ in ['0'..'9']) do
+      Inc(P);
+  end;
+
+  // exponent
+  if (P < EndP) and ((P^ = 'e') or (P^ = 'E')) then
+  begin
+    Inc(P);
+    NegE := False;
+    if (P < EndP) then
+    begin
+      case P^ of
+        '-':
+          begin
+            NegE := True;
+            Inc(P);
+          end;
+        '+':
+          Inc(P);
+      end;
+      Exponent := 0;
+      F := P;
+      while (P < EndP) and (P^ in ['0'..'9']) do
+      begin
+        Exponent := Exponent * 10 + (Ord(P^) - Ord('0'));
+        Inc(P);
+      end;
+      if P = F then
+      begin
+        // no exponent
+        FLook.Kind := jtkInvalidSymbol;
+        FText := P;
+        Exit;
+      end;
+
+      if Exponent > 308 then
+        Exponent := 308;
+
+      Scale := 1.0;
+      while Exponent >= 50 do
+      begin
+        Scale := Scale * 1E50;
+        Dec(Exponent, 50);
+      end;
+      while Exponent >= 18 do
+      begin
+        Scale := Scale * 1E18;
+        Dec(Exponent, 18);
+      end;
+      Scale := Scale * Power10[Exponent];
+
+      if NegE then
+        Value := Value / Scale
+      else
+        Value := Value * Scale;
+    end
+    else
+    begin
+      FLook.Kind := jtkInvalidSymbol;
+      FText := P;
+      Exit;
+    end;
+  end;
+
+  if Neg then
+    FLook.F := -Value
+  else
+    FLook.F := Value;
+  FLook.Kind := jtkFloat;
+  FText := P;
+end;
+
+procedure TStringJsonReader.LexIdent(P: PChar{$IFDEF CPUARM}; EndP: PChar{$ENDIF});
+const
+  {$IFDEF BIGENDIAN}
+  // Big Endian
+  NullStr1 = LongWord((Ord('n') shl 16) or Ord('u'));
+  NullStr2 = LongWord((Ord('l') shl 16) or Ord('l'));
+  TrueStr1 = LongWord((Ord('t') shl 16) or Ord('r'));
+  TrueStr2 = LongWord((Ord('u') shl 16) or Ord('e'));
+  FalseStr1 = LongWord((Ord('a') shl 16) or Ord('l'));
+  FalseStr2 = LongWord((Ord('s') shl 16) or Ord('e'));
+  {$ELSE}
+  // Little Endian
+  NullStr1 = LongWord(Ord('n') or (Ord('u') shl 16));
+  NullStr2 = LongWord(Ord('l') or (Ord('l') shl 16));
+  TrueStr1 = LongWord(Ord('t') or (Ord('r') shl 16));
+  TrueStr2 = LongWord(Ord('u') or (Ord('e') shl 16));
+  FalseStr1 = LongWord(Ord('a') or (Ord('l') shl 16));
+  FalseStr2 = LongWord(Ord('s') or (Ord('e') shl 16));
+  {$ENDIF BIGENDIAN}
+var
+  F: PChar;
+  {$IFNDEF CPUARM}
+  EndP: PChar;
+  {$ENDIF ~CPUARM}
+  L: LongWord;
+begin
+  F := P;
+  {$IFNDEF CPUARM}
+  EndP := FTextEnd;
+  {$ENDIF ~CPUARM}
+  case P^ of
+    'A'..'Z', 'a'..'z', '_', '$':
+      begin
+        Inc(P);
+        while (P < EndP) and (P^ in ['A'..'Z', 'a'..'z', '_', '0'..'9']) do
+          Inc(P);
+        L := P - F;
+        if L = 4 then
+        begin
+          L := PLongWord(F)^;
+          if (L = NullStr1) and (PLongWord(F + 2)^ = NullStr2) then
+            FLook.Kind := jtkNull
+          else if (L = TrueStr1) and (PLongWord(F + 2)^ = TrueStr2) then
+            FLook.Kind := jtkTrue
+          else
+          begin
+            SetString(FLook.S, F, P - F);
+            FLook.Kind := jtkIdent;
+          end;
+        end
+        else if (L = 5) and (F^ = 'f') and (PLongWord(F + 1)^ = FalseStr1) and (PLongWord(F + 3)^ = FalseStr2) then
+          FLook.Kind := jtkFalse
+        else
+        begin
+          SetString(FLook.S, F, P - F);
+          FLook.Kind := jtkIdent;
+        end;
+      end;
+  else
+    FLook.Kind := jtkInvalidSymbol;
+    Inc(P);
+  end;
+  FText := P;
+end;
+
+{ TStackStringBuffer }
+
+procedure TStackStringBuffer.Init(ADestStr: PString);
+begin
+  FBufPos := @FBuf[0];
+  FLen := Length(ADestStr^);
+  FDestStr := ADestStr;
+end;
+
+procedure TStackStringBuffer.Done;
+var
+  L: Integer;
+begin
+  if FBufPos > @FBuf[0] then
+  begin
+    L := (FBufPos - @FBuf[0]);
+    SetLength(FDestStr^, FLen + L);
+    Move(FBuf[0], PChar(Pointer(FDestStr^))[FLen], L * SizeOf(Char));
+    Inc(FLen, L);
+    FBufPos := @FBuf[0];
+  end;
+end;
+
+procedure TStackStringBuffer.AppendStr(Value: PChar; Len: Integer);
+var
+  L: Integer;
+begin
+  if Value <> '' then
+  begin
+    L := Len;
+    if L = 1 then
+      AppendChar(Value[0])
+    else if L = 2 then
+      Append2Char(Value[0], Value[1])
+    else
+    begin
+      if FBufPos + L >= @FBuf[MaxBuf] then
+        Done;
+
+      if L >= Length(FBuf) div 2 then // large string => append it directly to FDestStr
+      begin
+        Done;
+        SetLength(FDestStr^, FLen + L);
+        Move(Value[0], PChar(Pointer(FDestStr^))[FLen], L * SizeOf(Char));
+        Inc(FLen, L);
+      end
+      else
+      begin
+        Move(Value[0], FBufPos^, L * SizeOf(Char));
+        Inc(FBufPos, L);
+      end;
+    end;
+  end;
+end;
+
+procedure TStackStringBuffer.AppendChar(Value: Char);
+var
+  P: PChar;
+begin
+  P := FBufPos;
+  if P = @FBuf[MaxBuf] then
+    Done;
+  P^ := Value;
+  Inc(P);
+  FBufPos := P;
+end;
+
+procedure TStackStringBuffer.Append2Char(Value1, Value2: Char);
+var
+  P: PChar;
+begin
+  P := FBufPos;
+  if P + 1 >= @FBuf[MaxBuf] then
+    Done;
+  P^ := Value1;
+  Inc(P);
+  P^ := Value2;
+  Inc(P);
+  FBufPos := P;
+end;
+
+{function TStackStringBuffer.IsEmpty: Boolean;
+begin
+  Result := (FBufPos = @FBuf[0]) and (FLen = 0);
+end;}
+
+{ TJsonDataValueHelper }
+
+class operator TJsonDataValueHelper.Implicit(const Value: string): TJsonDataValueHelper;
+begin
+  Result.FData.FName := '';
+  Result.FData.FNameResolver := nil;
+  Result.FData.FIntern := nil;
+  {$IFDEF AUTOREFCOUNT}
+  if Result.FData.FObj <> nil then
+    Result.FData.FObj := nil;
+  {$ENDIF AUTOREFCOUNT}
+  Result.FData.FTyp := jdtString;
+  Result.FData.FValue := Value;
+end;
+
+class operator TJsonDataValueHelper.Implicit(const Value: TJsonDataValueHelper): string;
+begin
+  if Value.FData.FIntern <> nil then
+    Result := Value.FData.FIntern.Value
+  else
+    case Value.FData.FTyp of
+      jdtString:
+        Result := Value.FData.FValue;
+      jdtInt:
+        Result := IntToStr(Value.FData.FIntValue);
+      jdtLong:
+        Result := IntToStr(Value.FData.FLongValue);
+      jdtFloat:
+        Result := FloatToStr(Value.FData.FFloatValue, JSONFormatSettings);
+      jdtBool:
+        if Value.FData.FBoolValue then
+          Result := sTrue
+        else
+          Result := sFalse;
+    else
+      Result := '';
+    end;
+end;
+
+class operator TJsonDataValueHelper.Implicit(const Value: Integer): TJsonDataValueHelper;
+begin
+  Result.FData.FName := '';
+  Result.FData.FNameResolver := nil;
+  Result.FData.FIntern := nil;
+  {$IFDEF AUTOREFCOUNT}
+  if Result.FData.FObj <> nil then
+    Result.FData.FObj := nil;
+  {$ENDIF AUTOREFCOUNT}
+  Result.FData.FTyp := jdtInt;
+  Result.FData.FIntValue := Value;
+end;
+
+class operator TJsonDataValueHelper.Implicit(const Value: TJsonDataValueHelper): Integer;
+begin
+  if Value.FData.FIntern <> nil then
+    Result := Value.FData.FIntern.IntValue
+  else
+    case Value.FData.FTyp of
+      jdtString:
+        Result := StrToIntDef(Value.FData.FValue, 0);
+      jdtInt:
+        Result := Value.FData.FIntValue;
+      jdtLong:
+        Result := Value.FData.FLongValue;
+      jdtFloat:
+        Result := Trunc(Value.FData.FFloatValue);
+      jdtBool:
+        Result := Ord(Value.FData.FBoolValue);
+    else
+      Result := 0;
+    end;
+end;
+
+class operator TJsonDataValueHelper.Implicit(const Value: Int64): TJsonDataValueHelper;
+begin
+  Result.FData.FName := '';
+  Result.FData.FNameResolver := nil;
+  Result.FData.FIntern := nil;
+  {$IFDEF AUTOREFCOUNT}
+  if Result.FData.FObj <> nil then
+    Result.FData.FObj := nil;
+  {$ENDIF AUTOREFCOUNT}
+  Result.FData.FTyp := jdtLong;
+  Result.FData.FLongValue := Value;
+end;
+
+class operator TJsonDataValueHelper.Implicit(const Value: TJsonDataValueHelper): Int64;
+begin
+  if Value.FData.FIntern <> nil then
+    Result := Value.FData.FIntern.LongValue
+  else
+    case Value.FData.FTyp of
+      jdtString:
+        Result := StrToInt64Def(Value.FData.FValue, 0);
+      jdtInt:
+        Result := Value.FData.FIntValue;
+      jdtLong:
+        Result := Value.FData.FLongValue;
+      jdtFloat:
+        Result := Trunc(Value.FData.FFloatValue);
+      jdtBool:
+        Result := Ord(Value.FData.FBoolValue);
+    else
+      Result := 0;
+    end;
+end;
+
+class operator TJsonDataValueHelper.Implicit(const Value: Double): TJsonDataValueHelper;
+begin
+  Result.FData.FName := '';
+  Result.FData.FNameResolver := nil;
+  Result.FData.FIntern := nil;
+  {$IFDEF AUTOREFCOUNT}
+  if Result.FData.FObj <> nil then
+    Result.FData.FObj := nil;
+  {$ENDIF AUTOREFCOUNT}
+  Result.FData.FTyp := jdtFloat;
+  Result.FData.FFloatValue := Value;
+end;
+
+class operator TJsonDataValueHelper.Implicit(const Value: TJsonDataValueHelper): Double;
+begin
+  if Value.FData.FIntern <> nil then
+    Result := Value.FData.FIntern.FloatValue
+  else
+    case Value.FData.FTyp of
+      jdtString:
+        Result := StrToFloat(Value.FData.FValue, JSONFormatSettings);
+      jdtInt:
+        Result := Value.FData.FIntValue;
+      jdtLong:
+        Result := Value.FData.FLongValue;
+      jdtFloat:
+        Result := Value.FData.FFloatValue;
+      jdtBool:
+        Result := Ord(Value.FData.FBoolValue);
+    else
+      Result := 0;
+    end;
+end;
+
+class operator TJsonDataValueHelper.Implicit(const Value: Boolean): TJsonDataValueHelper;
+begin
+  Result.FData.FName := '';
+  Result.FData.FNameResolver := nil;
+  Result.FData.FIntern := nil;
+  {$IFDEF AUTOREFCOUNT}
+  if Result.FData.FObj <> nil then
+    Result.FData.FObj := nil;
+  {$ENDIF AUTOREFCOUNT}
+  Result.FData.FTyp := jdtBool;
+  Result.FData.FBoolValue := Value;
+end;
+
+class operator TJsonDataValueHelper.Implicit(const Value: TJsonDataValueHelper): Boolean;
+begin
+  if Value.FData.FIntern <> nil then
+    Result := Value.FData.FIntern.BoolValue
+  else
+    case Value.FData.FTyp of
+      jdtString:
+        Result := Value.FData.FValue = 'true';
+      jdtInt:
+        Result := Value.FData.FIntValue <> 0;
+      jdtLong:
+        Result := Value.FData.FLongValue <> 0;
+      jdtFloat:
+        Result := Value.FData.FFloatValue <> 0;
+      jdtBool:
+        Result := Value.FData.FBoolValue;
+    else
+      Result := False;
+    end;
+end;
+
+class operator TJsonDataValueHelper.Implicit(const Value: TJsonArray): TJsonDataValueHelper;
+begin
+  Result.FData.FName := '';
+  Result.FData.FNameResolver := nil;
+  Result.FData.FIntern := nil;
+  {$IFDEF AUTOREFCOUNT}
+  if Result.FData.FValue <> '' then
+    Result.FData.FValue := '';
+  {$ENDIF AUTOREFCOUNT}
+  Result.FData.FTyp := jdtArray;
+  Result.FData.FObj := Value;
+end;
+
+class operator TJsonDataValueHelper.Implicit(const Value: TJsonDataValueHelper): TJsonArray;
+begin
+  Value.ResolveName;
+  if Value.FData.FIntern <> nil then
+  begin
+    if Value.FData.FIntern.FTyp = jdtNone then
+      Value.FData.FIntern.ArrayValue := TJsonArray.Create;
+    Result := Value.FData.FIntern.ArrayValue;
+  end
+  else if Value.FData.FTyp = jdtArray then
+    Result := TJsonArray(Value.FData.FObj)
+  else
+    Result := nil;
+end;
+
+class operator TJsonDataValueHelper.Implicit(const Value: TJsonObject): TJsonDataValueHelper;
+begin
+  Result.FData.FName := '';
+  Result.FData.FNameResolver := nil;
+  Result.FData.FIntern := nil;
+  {$IFDEF AUTOREFCOUNT}
+  if Result.FData.FValue <> '' then
+    Result.FData.FValue := '';
+  {$ENDIF AUTOREFCOUNT}
+  Result.FData.FTyp := jdtObject;
+  Result.FData.FObj := Value;
+end;
+
+class operator TJsonDataValueHelper.Implicit(const Value: TJsonDataValueHelper): TJsonObject;
+begin
+  Value.ResolveName;
+  if Value.FData.FIntern <> nil then
+  begin
+    if Value.FData.FIntern.FTyp = jdtNone then
+      Value.FData.FIntern.ObjectValue := TJsonObject.Create;
+    Result := Value.FData.FIntern.ObjectValue;
+  end
+  else if Value.FData.FTyp = jdtObject then
+    Result := TJsonObject(Value.FData.FObj)
+  else
+    Result := nil;
+end;
+
+class operator TJsonDataValueHelper.Implicit(const Value: Pointer): TJsonDataValueHelper;
+begin
+  Result.FData.FName := '';
+  Result.FData.FNameResolver := nil;
+  Result.FData.FIntern := nil;
+  {$IFDEF AUTOREFCOUNT}
+  if Result.FData.FValue <> '' then
+    Result.FData.FValue := '';
+  {$ENDIF AUTOREFCOUNT}
+  Result.FData.FTyp := jdtObject;
+  Result.FData.FObj := nil;
+end;
+
+function TJsonDataValueHelper.GetValue: string;
+begin
+  Result := Self;
+end;
+
+procedure TJsonDataValueHelper.SetValue(const Value: string);
+begin
+  ResolveName;
+  if FData.FIntern <> nil then
+    FData.FIntern.Value := Value
+  else
+    Self := Value;
+end;
+
+function TJsonDataValueHelper.GetIntValue: Integer;
+begin
+  Result := Self;
+end;
+
+procedure TJsonDataValueHelper.SetIntValue(const Value: Integer);
+begin
+  ResolveName;
+  if FData.FIntern <> nil then
+    FData.FIntern.IntValue := Value
+  else
+    Self := Value;
+end;
+
+function TJsonDataValueHelper.GetLongValue: Int64;
+begin
+  Result := Self;
+end;
+
+procedure TJsonDataValueHelper.SetLongValue(const Value: Int64);
+begin
+  ResolveName;
+  if FData.FIntern <> nil then
+    FData.FIntern.LongValue := Value
+  else
+    Self := Value;
+end;
+
+function TJsonDataValueHelper.GetFloatValue: Double;
+begin
+  Result := Self;
+end;
+
+procedure TJsonDataValueHelper.SetFloatValue(const Value: Double);
+begin
+  ResolveName;
+  if FData.FIntern <> nil then
+    FData.FIntern.FloatValue := Value
+  else
+    Self := Value;
+end;
+
+function TJsonDataValueHelper.GetBoolValue: Boolean;
+begin
+  Result := Self;
+end;
+
+procedure TJsonDataValueHelper.SetBoolValue(const Value: Boolean);
+begin
+  ResolveName;
+  if FData.FIntern <> nil then
+    FData.FIntern.BoolValue := Value
+  else
+    Self := Value;
+end;
+
+function TJsonDataValueHelper.GetArrayValue: TJsonArray;
+begin
+  Result := Self;
+end;
+
+procedure TJsonDataValueHelper.SetArrayValue(const Value: TJsonArray);
+begin
+  ResolveName;
+  if FData.FIntern <> nil then
+    FData.FIntern.ArrayValue := Value
+  else
+    Self := Value;
+end;
+
+function TJsonDataValueHelper.GetObjectValue: TJsonObject;
+begin
+  Result := Self;
+end;
+
+procedure TJsonDataValueHelper.SetObjectValue(const Value: TJsonObject);
+begin
+  ResolveName;
+  if FData.FIntern <> nil then
+    FData.FIntern.ObjectValue := Value
+  else
+    Self := Value;
+end;
+
+function TJsonDataValueHelper.GetTyp: TJsonDataType;
+begin
+  if FData.FIntern <> nil then
+    Result := FData.FIntern.Typ
+  else
+    Result := FData.FTyp;
+end;
+
+class procedure TJsonDataValueHelper.SetInternValue(Item: PJsonDataValue;
+  const Value: TJsonDataValueHelper);
+begin
+  Value.ResolveName;
+  if Value.FData.FIntern <> nil then
+  begin
+    Item.Clear;
+    TJsonBaseObject.InternInitAndAssignItem(Item, Value.FData.FIntern); // clones arrays and objects
+  end
+  else
+  begin
+    case Value.FData.FTyp of
+      jdtString:
+        Item.Value := Value.FData.FValue;
+      jdtInt:
+        Item.IntValue := Value.FData.FIntValue;
+      jdtLong:
+        Item.LongValue := Value.FData.FLongValue;
+      jdtFloat:
+        Item.FloatValue := Value.FData.FFloatValue;
+      jdtBool:
+        Item.BoolValue := Value.FData.FBoolValue;
+      jdtArray:
+        Item.ArrayValue := TJsonArray(Value.FData.FObj);
+      jdtObject:
+        Item.ObjectValue := TJsonObject(Value.FData.FObj);
+    else
+      Item.Clear;
+    end;
+  end;
+end;
+
+function TJsonDataValueHelper.GetArrayItem(Index: Integer): TJsonDataValueHelper;
+begin
+  Result := ArrayValue.Values[Index];
+end;
+
+procedure TJsonDataValueHelper.SetArray(const Name: string; const AValue: TJsonArray);
+begin
+  ObjectValue.A[Name] := AValue;
+end;
+
+function TJsonDataValueHelper.GetArray(const Name: string): TJsonArray;
+begin
+  Result := ObjectValue.A[Name];
+end;
+
+function TJsonDataValueHelper.GetObject(const Name: string): TJsonDataValueHelper;
+begin
+  Result := ObjectValue.Values[Name];
+end;
+
+procedure TJsonDataValueHelper.SetObject(const Name: string; const Value: TJsonDataValueHelper);
+begin
+  ObjectValue.Values[Name] := Value;
+end;
+
+procedure TJsonDataValueHelper.ResolveName;
+begin
+  if (FData.FIntern = nil) and (FData.FNameResolver <> nil) then
+  begin
+    FData.FIntern := FData.FNameResolver.RequireItem(FData.FName);
+    FData.FNameResolver := nil;
+    FData.FName := '';
+  end;
+end;
+
+{ TEncodingStrictAccess }
+
+function TEncodingStrictAccess.GetByteCountEx(Chars: PChar; CharCount: Integer): Integer;
+begin
+  Result := GetByteCount(Chars, CharCount);
+end;
+
+function TEncodingStrictAccess.GetBytesEx(Chars: PChar; CharCount: Integer; Bytes: PByte; ByteCount: Integer): Integer;
+begin
+  Result := GetBytes(Chars, CharCount, Bytes, ByteCount);
+end;
+
+function TEncodingStrictAccess.GetCharCountEx(Bytes: PByte; ByteCount: Integer): Integer;
+begin
+  Result := GetCharCount(Bytes, ByteCount);
+end;
+
+function TEncodingStrictAccess.GetCharsEx(Bytes: PByte; ByteCount: Integer; Chars: PChar; CharCount: Integer): Integer;
+begin
+  Result := GetChars(Bytes, ByteCount, Chars, CharCount);
+end;
+
+{ TJsonOutputWriter.TJsonStringBuilder }
+
+procedure TJsonOutputWriter.TJsonStringBuilder.Init;
+begin
+  FLen := 0;
+  FCapacity := 0;
+  FData := nil;
+end;
+
+procedure TJsonOutputWriter.TJsonStringBuilder.Done;
+var
+  P: PStrRec;
+begin
+  if FData <> nil then
+  begin
+    P := PStrRec(PByte(FData) - SizeOf(TStrRec));
+    FreeMem(P);
+  end;
+end;
+
+procedure TJsonOutputWriter.TJsonStringBuilder.DoneToString(var S: string);
+var
+  StrP: PStrRec;
+  P: PChar;
+begin
+  S := '';
+  if FData <> nil then
+  begin
+    // Release the unused memory and terminate the string with a #0. The result is that we have a
+    // native string that is exactly the same as if it was allocated by System.@NewUnicodeString.
+    StrP := PStrRec(PByte(FData) - SizeOf(TStrRec));
+    if Len <> FCapacity then
+      ReallocMem(Pointer(StrP), SizeOf(TStrRec) + (Len + 1) * SizeOf(Char)); // allocate +1 char for the #0
+    // Set the string's length
+    StrP.Length := Len;
+    P := PChar(PByte(StrP) + SizeOf(TStrRec));
+    P[Len] := #0;
+    Pointer(S) := P; // keep the RefCnt=1
+  end;
+end;
+
+procedure TJsonOutputWriter.TJsonStringBuilder.FlushToBytes(var Bytes: TBytes; Encoding: TEncoding);
+var
+  L: Integer;
+begin
+  if Len > 0 then
+  begin
+    // Use the "strict protected" methods that use PChar instead of TCharArray what allows us to
+    // use FData directly without converting it to a dynamic TCharArray (and skipping the sanity
+    // checks)
+    L := TEncodingStrictAccess(Encoding).GetByteCountEx(FData, FLen);
+    SetLength(Bytes, L);
+    if L > 0 then
+      TEncodingStrictAccess(Encoding).GetBytesEx(FData, FLen, @Bytes[0], L);
+  end
+  else
+    Bytes := nil;
+  FLen := 0; // "clear" the buffer but don't release the memory
+end;
+
+procedure TJsonOutputWriter.TJsonStringBuilder.Grow(MinLen: Integer);
+var
+  C: Integer;
+  StrP: PStrRec;
+begin
+  C := FCapacity;
+  C := C * 2;
+  if MinLen < 256 then // begin with a 256 char buffer
+    MinLen := 256;
+  {$IFNDEF CPUX64}
+  if C > 1024 * 1024 * 1024 then
+  begin
+    // Memory fragmentation can become a problem, so allocate only the amount of memory that
+    // is needed
+    C := MinLen;
+  end
+  else
+  {$ENDIF ~CPUX64}
+  if C < MinLen then
+    C := MinLen;
+  FCapacity := C;
+  if FData <> nil then
+  begin
+    StrP := Pointer(PByte(FData) - SizeOf(TStrRec));
+    ReallocMem(StrP, SizeOf(TStrRec) + (C + 1) * SizeOf(Char)); // allocate +1 char for the #0 that DoneToString() adds
+  end
+  else
+  begin
+    // Build the buffer with the StrRec header so it can be easily mapped to a "native string" in
+    // DoneToString.
+    GetMem(Pointer(StrP), SizeOf(TStrRec) + (C + 1) * SizeOf(Char)); // allocate +1 char for the #0 that DoneToString() adds
+    StrP.CodePage := Word(DefaultUnicodeCodePage);
+    StrP.ElemSize := SizeOf(Char);
+    StrP.RefCnt := 1;
+    StrP.Length := 0; // DoneToString set the correct value
+  end;
+  FData := PChar(PByte(StrP) + SizeOf(TStrRec));
+end;
+
+procedure TJsonOutputWriter.TJsonStringBuilder.Append3(Ch1: Char; const S2, S3: string);
+var
+  L, S2L, S3L, LLen: Integer;
+begin
+  LLen := FLen;
+  S2L := Length(S2);
+  S3L := Length(S3);
+  L := 1 + S2L + S3L;
+  if LLen + L >= FCapacity then
+    Grow(LLen + L);
+
+  FData[LLen] := Ch1;
+  Inc(LLen);
+
+  case S2L of
+    1: FData[LLen] := PChar(Pointer(S2))^;
+    2: PLongWord(@FData[LLen])^ := PLongWord(Pointer(S2))^;
+  else
+    Move(PChar(Pointer(S2))[0], FData[LLen], S2L * SizeOf(Char));
+  end;
+  Inc(LLen, S2L);
+
+  case S3L of
+    1: FData[LLen] := PChar(Pointer(S3))^;
+    2: PLongWord(@FData[LLen])^ := PLongWord(Pointer(S3))^;
+  else
+    Move(PChar(Pointer(S3))[0], FData[LLen], S3L * SizeOf(Char));
+  end;
+  FLen := LLen + S3L;
+end;
+
+function TJsonOutputWriter.TJsonStringBuilder.Append(const S: string): PJsonStringBuilder;
+var
+  L, LLen: Integer;
+begin
+  LLen := FLen;
+  L := Length(S);
+  if L > 0 then
+  begin
+    if LLen + L >= FCapacity then
+      Grow(LLen + L);
+    case L of
+      1: FData[LLen] := PChar(Pointer(S))^;
+      2: PLongWord(@FData[LLen])^ := PLongWord(Pointer(S))^;
+    else
+      Move(PChar(Pointer(S))[0], FData[LLen], L * SizeOf(Char));
+    end;
+    FLen := LLen + L;
+  end;
+  Result := @Self;
+end;
+
+{function TJsonOutputWriter.TJsonStringBuilder.Append(Ch: Char): PJsonStringBuilder;
+var
+  LNewLen: Integer;
+begin
+  LNewLen := FLen + 1;
+  if LNewLen >= FCapacity then
+    Grow(LNewLen);
+  FData[LNewLen - 1] := Ch;
+  FLen := LNewLen;
+  Result := @Self;
+end;
+
+function TJsonOutputWriter.TJsonStringBuilder.ToString: string;
+begin
+  if FData <> nil then
+    SetString(Result, FData, Len)
+  else
+    Result := '';
+end;}
+
+initialization
+  {$IFDEF USE_NAME_STRING_LITERAL}
+  InitializeJsonMemInfo;
+  {$ENDIF USE_NAME_STRING_LITERAL}
+  JSONFormatSettings.DecimalSeparator := '.';
+
+end.

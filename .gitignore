@@ -22,6 +22,11 @@
 #*.deployproj
 #
 
+#Project structure
+bin/***
+dcus/***
+UnitTest/*.res
+
 # Delphi compiler-generated binaries (safe to delete)
 *.exe
 *.dll
