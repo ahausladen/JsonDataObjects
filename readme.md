@@ -7,7 +7,11 @@ Win32, Win64 and ARM Android (MacOS and iOS may work).
 Clone with GIT
 --------------
 ```
-> git clone git@github.com:ahausladen/JsonDataObjects.git JsonDataObjects
+> git clone git@github.com:ahausladen/JsonDataObjects.git
+```
+or
+```
+> git clone https://github.com/ahausladen/JsonDataObjects.git
 ```
 
 This will get you the Json Data Objects repository.
