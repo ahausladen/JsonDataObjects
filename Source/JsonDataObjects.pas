@@ -140,10 +140,9 @@ type
       procedure DoneToString(var S: string);
       procedure FlushToBytes(var Bytes: TBytes; Encoding: TEncoding);
 
-      function Append(const S: string): PJsonStringBuilder; //overload;
-      //function Append(Ch: Char): PJsonStringBuilder; overload;
+      function Append(const S: string): PJsonStringBuilder; overload;
+      procedure Append(P: PChar; Len: Integer); overload;
       procedure Append3(Ch1: Char; const S2, S3: string);
-      //function ToString: string;
 
       property Len: Integer read FLen;
       property Data: PChar read FData;
@@ -170,7 +169,8 @@ type
     procedure StreamFlushPossible;   // checks if StreamFlush must be called
     procedure StreamFlush;           // writes the buffer to the stream
     procedure ExpandIndents;
-    procedure AppendLine(AppendOn: TLastType; const S: string);
+    procedure AppendLine(AppendOn: TLastType; const S: string); overload;
+    procedure AppendLine(AppendOn: TLastType; P: PChar; Len: Integer); overload;
     procedure FlushLastLine;
   private // unit private
     procedure Init(ACompact: Boolean; AStream: TStream; AEncoding: TEncoding; ALines: TStrings);
@@ -181,7 +181,8 @@ type
     procedure Indent(const S: string);
     procedure Unindent(const S: string);
     procedure AppendIntro(const S: string);
-    procedure AppendValue(const S: string);
+    procedure AppendValue(const S: string); overload;
+    procedure AppendValue(P: PChar; Len: Integer); overload;
     procedure AppendStrValue(const S: string);
     procedure AppendSeparator(const S: string);
   end;
@@ -1787,9 +1788,149 @@ begin
   end;
 end;
 
+function DoubleToText(Buffer: PChar; const Value: Extended): Integer; inline;
+begin
+  Result := FloatToText(Buffer, Value, fvExtended, ffGeneral, 15, 0, JSONFormatSettings);
+end;
+
+const
+  DoubleDigits: array[0..99] of array[0..1] of Char = (
+    '00', '01', '02', '03', '04', '05', '06', '07', '08', '09',
+    '10', '11', '12', '13', '14', '15', '16', '17', '18', '19',
+    '20', '21', '22', '23', '24', '25', '26', '27', '28', '29',
+    '30', '31', '32', '33', '34', '35', '36', '37', '38', '39',
+    '40', '41', '42', '43', '44', '45', '46', '47', '48', '49',
+    '50', '51', '52', '53', '54', '55', '56', '57', '58', '59',
+    '60', '61', '62', '63', '64', '65', '66', '67', '68', '69',
+    '70', '71', '72', '73', '74', '75', '76', '77', '78', '79',
+    '80', '81', '82', '83', '84', '85', '86', '87', '88', '89',
+    '90', '91', '92', '93', '94', '95', '96', '97', '98', '99'
+  );
+
+function InternIntToText(Value: Cardinal; Negative: Boolean; EndP: PChar): PChar;
+var
+  I, Quotient, K: Cardinal;
+begin
+  I := Value;
+  Result := EndP;
+  while I >= 100 do
+  begin
+    Quotient := I div 100;
+    K := Quotient * 100;
+    K := I - K;
+    I := Quotient;
+    Dec(Result, 2);
+    PDWORD(Result)^ := DWORD(DoubleDigits[K]);
+  end;
+  if I >= 10 then
+  begin
+    Dec(Result, 2);
+    PDWORD(Result)^ := DWORD(DoubleDigits[I]);
+  end
+  else
+  begin
+    Dec(Result);
+    Result^ := Char(I or Ord('0'));
+  end;
+
+  if Negative then
+  begin
+    Dec(Result);
+    Result^ := '-';
+  end;
+end;
+
+function IntToText(Value: Integer; EndP: PChar): PChar; inline;
+begin
+  if Value < 0 then
+    Result := InternIntToText(Cardinal(-Value), True, EndP)
+  else
+    Result := InternIntToText(Cardinal(Value), False, EndP);
+end;
+
+(*function IntToText(EndP: PChar; Value: Integer): PChar;
+const
+  MinIntText = '-2147483648';
+var
+  Remainder: Integer;
+  Neg: Boolean;
+begin
+  Result := EndP;
+  if Value = Low(Integer) then
+  begin
+    Dec(Result, 11);
+    Move(PChar(MinIntText)[0], Result[0], 11 * SizeOf(Char));
+    Exit;
+  end;
+
+  Neg := Value < 0;
+  if Neg then
+    Value := -Value;
+
+  while Value >= 65536 do
+  begin
+    //Quotient := Value div 100;
+    //Remainder := Value - (Quotient * 100);
+
+    Remainder := Value; // use as backup to safe a local variable
+    Value := Value div 100;
+    Remainder := Remainder - (Value shl 6 + Value shl 5 + Value shl 2);
+
+    Dec(Result, 2);
+    PLongWord(Result)^ := PLongWord(@DoubleDigits[Remainder])^;
+  end;
+
+  repeat
+    Remainder := Value; // use as backup to safe a local variable
+    Value := Integer(LongWord(Value * 52429) shr (16 + 3));
+    // Remainder := Value - (Quotient * 10)
+    Remainder := Remainder - (Value shl 3 + Value shl 1);
+    Dec(Result);
+    Result^ := DoubleDigits[Remainder][1];
+  until Value = 0;
+
+  if Neg then
+  begin
+    Dec(Result);
+    Result^ := '-';
+  end;
+end;*)
+
+function Int64ToText(Value: Int64; EndP: PChar): PChar;
+var
+  Quotient: Int64;
+  Remainder: Integer;
+  Neg: Boolean;
+begin
+  Result := EndP;
+
+  Neg := Value < 0;
+  if Neg then
+    Value := -Value;
+
+  while Value > High(Integer) do
+  begin
+    Quotient := Value div 100;
+    //Remainder := Value - (Quotient * 100);
+    Remainder := Value - (Quotient shl 6 + Quotient shl 5 + Quotient shl 2);
+    Value := Quotient;
+
+    Dec(Result, 2);
+    PDWORD(Result)^ := DWORD(DoubleDigits[Remainder]);
+  end;
+
+  Result := InternIntToText(Cardinal(Value), False, Result);
+  if Neg then
+  begin
+    Dec(Result);
+    Result^ := '-';
+  end;
+end;
+
 procedure TJsonDataValue.InternToJSON(var Writer: TJsonOutputWriter);
 var
-  S: string; // don't let the compiler create temporary strings itself as this will slow down the "end;"
+  Buffer: array[0..63] of Char;
+  P: PChar;
 begin
   case FTyp of
     jdtNone:
@@ -1798,19 +1939,16 @@ begin
       TJsonBaseObject.StrToJSONStr(Writer.AppendStrValue, string(FValue.S));
     jdtInt:
       begin
-        S := IntToStr(FValue.I);
-        Writer.AppendValue(S);
+        P := IntToText(FValue.I, @PChar(@Buffer[0])[Length(Buffer)]);
+        Writer.AppendValue(P, @PChar(@Buffer[0])[Length(Buffer)] - P);
       end;
     jdtLong:
       begin
-        S := IntToStr(FValue.L);
-        Writer.AppendValue(S);
+        P := Int64ToText(FValue.L, @PChar(@Buffer[0])[Length(Buffer)]);
+        Writer.AppendValue(P, @PChar(@Buffer[0])[Length(Buffer)] - P);
       end;
     jdtFloat:
-      begin
-        S := FloatToStr(FValue.F, JSONFormatSettings);
-        Writer.AppendValue(S);
-      end;
+      Writer.AppendValue(Buffer, DoubleToText(Buffer, FValue.F));
     jdtBool:
       if FValue.B then
         Writer.AppendValue(sTrue)
@@ -4141,6 +4279,28 @@ begin
   end;
 end;
 
+procedure TJsonOutputWriter.AppendLine(AppendOn: TLastType; P: PChar; Len: Integer);
+var
+  L: Integer;
+begin
+  if FLastType = AppendOn then
+  begin
+    L := Length(FLastLine);
+    SetLength(FLastLine, L + Len);
+    Move(P[0], PChar(Pointer(FLastLine))[L], Len * SizeOf(Char));
+  end
+  else
+  begin
+    FlushLastLine;
+    StreamFlushPossible;
+    L := Length(FIndents[FIndent]);
+    SetLength(FLastLine, L + Len);
+    if L > 0 then
+      Move(FIndents[FIndent], PChar(Pointer(FLastLine))[0], L * SizeOf(Char));
+    Move(P[0], PChar(Pointer(FLastLine))[L], Len * SizeOf(Char));
+  end;
+end;
+
 procedure TJsonOutputWriter.Indent(const S: string);
 begin
   if FStringBufferMode then
@@ -4201,6 +4361,30 @@ begin
     StreamFlushPossible;
     FLastLine := FIndents[FIndent] + sQuoteChar + S + '": ';
     FLastType := ltIntro;
+  end;
+end;
+
+procedure TJsonOutputWriter.AppendValue(P: PChar; Len: Integer);
+{$IFNDEF USE_JSONSTRINGBUILDER}
+var
+  L: Integer;
+{$ENDIF ~USE_JSONSTRINGBUILDER}
+begin
+  if FStringBufferMode then
+  begin
+    {$IFDEF USE_JSONSTRINGBUILDER}
+    FStringBuffer.Append(P, Len);
+    {$ELSE}
+    L := Length(FStringBuffer);
+    SetLength(FStringBuffer, L + Len);
+    Move(P[0], PChar(Pointer(FStringBuffer))[L], Len * SizeOf(Char));
+    {$ENDIF USE_JSONSTRINGBUILDER}
+    StreamFlushPossible;
+  end
+  else
+  begin
+    AppendLine(ltIntro, P, Len);
+    FLastType := ltValue;
   end;
 end;
 
@@ -5887,25 +6071,24 @@ begin
   Result := @Self;
 end;
 
-{function TJsonOutputWriter.TJsonStringBuilder.Append(Ch: Char): PJsonStringBuilder;
+procedure TJsonOutputWriter.TJsonStringBuilder.Append(P: PChar; Len: Integer);
 var
-  LNewLen: Integer;
+  LLen: Integer;
 begin
-  LNewLen := FLen + 1;
-  if LNewLen >= FCapacity then
-    Grow(LNewLen);
-  FData[LNewLen - 1] := Ch;
-  FLen := LNewLen;
-  Result := @Self;
+  LLen := FLen;
+  if Len > 0 then
+  begin
+    if LLen + Len >= FCapacity then
+      Grow(LLen + Len);
+    case Len of
+      1: FData[LLen] := P^;
+      2: PLongWord(@FData[LLen])^ := PLongWord(P)^;
+    else
+      Move(P[0], FData[LLen], Len * SizeOf(Char));
+    end;
+    FLen := LLen + Len;
+  end;
 end;
-
-function TJsonOutputWriter.TJsonStringBuilder.ToString: string;
-begin
-  if FData <> nil then
-    SetString(Result, FData, Len)
-  else
-    Result := '';
-end;}
 
 initialization
   {$IFDEF USE_NAME_STRING_LITERAL}
