@@ -1846,12 +1846,12 @@ begin
     K := I - K;
     I := Quotient;
     Dec(Result, 2);
-    PDWORD(Result)^ := DWORD(DoubleDigits[K]);
+    PLongWord(Result)^ := LongWord(DoubleDigits[K]);
   end;
   if I >= 10 then
   begin
     Dec(Result, 2);
-    PDWORD(Result)^ := DWORD(DoubleDigits[I]);
+    PLongWord(Result)^ := LongWord(DoubleDigits[I]);
   end
   else
   begin
@@ -1894,7 +1894,7 @@ begin
     Value := Quotient;
 
     Dec(Result, 2);
-    PDWORD(Result)^ := DWORD(DoubleDigits[Remainder]);
+    PLongWord(Result)^ := LongWord(DoubleDigits[Remainder]);
   end;
 
   Result := InternIntToText(Cardinal(Value), False, Result);
