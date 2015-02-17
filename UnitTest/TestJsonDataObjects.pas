@@ -45,6 +45,7 @@ type
     procedure TestToString;
     procedure TestDateTimeToJSON;
     procedure TestEmptyString;
+    procedure TestToUTF8JSON;
   end;
 
   TestTJsonArray = class(TTestCase)
@@ -1153,7 +1154,6 @@ begin
   TJsonBaseObject.JSONToDateTime('2015-02-14T22:58+0100');
 end;
 
-
 procedure TestTJsonBaseObject.TestEmptyString;
 var
   Json: TJsonObject;
@@ -1164,6 +1164,53 @@ begin
     CheckEqualsString('{"Name":""}', Json.ToJSON);
   finally
     Json.Free;
+  end;
+end;
+
+procedure TestTJsonBaseObject.TestToUTF8JSON;
+var
+  B: TJsonBaseObject;
+  U: UTF8String;
+  Bytes: TBytes;
+  ExpectedBytes: TBytes;
+  S: string;
+  I: Integer;
+begin
+  B := TJsonBaseObject.ParseUtf8('{ "Key": "Value" }');
+  try
+    U := B.ToUtf8JSON;
+    B.ToUtf8JSON(Bytes);
+    ExpectedBytes := TEncoding.UTF8.GetBytes('{"Key":"Value"}');
+
+    Check(Length(U) > 0);
+    Check(Length(Bytes) > 0);
+    CheckEquals(Length(ExpectedBytes), Length(U));
+    CheckEquals(Length(ExpectedBytes), Length(Bytes));
+    CheckEqualsMem(@ExpectedBytes[0], Pointer(U), Length(U));
+    CheckEqualsMem(@ExpectedBytes[0], @Bytes[0], Length(Bytes));
+  finally
+    B.Free;
+  end;
+
+  S := '{';
+  for I := 0 to 100000 do
+    S := S + '"Key' + IntToStr(I) + '":"Value",';
+  S := S + '"Key":"Value"}';
+
+  B := TJsonBaseObject.Parse(S);
+  try
+    U := B.ToUtf8JSON;
+    B.ToUtf8JSON(Bytes);
+    ExpectedBytes := TEncoding.UTF8.GetBytes(S);
+
+    Check(Length(U) > 0);
+    Check(Length(Bytes) > 0);
+    CheckEquals(Length(ExpectedBytes), Length(U));
+    CheckEquals(Length(ExpectedBytes), Length(Bytes));
+    CheckEqualsMem(@ExpectedBytes[0], Pointer(U), Length(U));
+    CheckEqualsMem(@ExpectedBytes[0], @Bytes[0], Length(Bytes));
+  finally
+    B.Free;
   end;
 end;
 

@@ -139,6 +139,7 @@ type
       procedure Done;
       procedure DoneToString(var S: string);
       procedure FlushToBytes(var Bytes: TBytes; Encoding: TEncoding);
+      procedure FlushToStream(Stream: TMemoryStream; Encoding: TEncoding);
 
       function Append(const S: string): PJsonStringBuilder; overload;
       procedure Append(P: PChar; Len: Integer); overload;
@@ -394,6 +395,10 @@ type
     procedure FromJSON(S: PWideChar; Len: Integer = -1); overload;
 
     function ToJSON(Compact: Boolean = True): string;
+    {$IFNDEF NEXTGEN}
+    function ToUtf8JSON(Compact: Boolean = True): UTF8String; overload;
+    {$ENDIF ~NEXTGEN}
+    procedure ToUtf8JSON(var Bytes: TBytes; Compact: Boolean = True); overload;
     // ToString() returns a compact JSON string
     function ToString: string; override;
 
@@ -806,6 +811,30 @@ type
     procedure LexIdent(P: PChar{$IFDEF CPUARM}; EndP: PChar{$ENDIF});
   public
     constructor Create(const S: PChar; Len: Integer);
+  end;
+
+  TJsonMemoryStream = class(TMemoryStream);
+
+  {$IFNDEF NEXTGEN}
+  TJsonUTF8StringStream = class(TJsonMemoryStream)
+  private
+    FDataString: UTF8String;
+  protected
+    function Realloc(var NewCapacity: Longint): Pointer; override;
+  public
+    constructor Create;
+    property DataString: UTF8String read FDataString;
+  end;
+  {$ENDIF ~NEXTGEN}
+
+  TJsonBytesStream = class(TJsonMemoryStream)
+  private
+    FBytes: TBytes;
+  protected
+    function Realloc(var NewCapacity: Longint): Pointer; override;
+  public
+    constructor Create;
+    property Bytes: TBytes read FBytes;
   end;
 
 var
@@ -2610,6 +2639,42 @@ begin
   end;
 end;
 
+{$IFNDEF NEXTGEN}
+function TJsonBaseObject.ToUtf8JSON(Compact: Boolean = True): UTF8String;
+var
+  Stream: TJsonUtf8StringStream;
+  Size: NativeInt;
+begin
+  Stream := TJsonUtf8StringStream.Create;
+  try
+    SaveToStream(Stream, Compact, nil, True);
+    Result := Stream.DataString;
+    Size := Stream.Size;
+  finally
+    Stream.Free;
+  end;
+  if Length(Result) <> Size then
+    SetLength(Result, Size);
+end;
+{$ENDIF ~NEXTGEN}
+
+procedure TJsonBaseObject.ToUtf8JSON(var Bytes: TBytes; Compact: Boolean = True);
+var
+  Stream: TJsonBytesStream;
+  Size: NativeInt;
+begin
+  Stream := TJsonBytesStream.Create;
+  try
+    SaveToStream(Stream, Compact, nil, True);
+    Size := Stream.Size;
+    Bytes := Stream.Bytes;
+  finally
+    Stream.Free;
+  end;
+  if Length(Bytes) <> Size then
+    SetLength(Bytes, Size);
+end;
+
 function TJsonBaseObject.ToString: string;
 begin
   Result := ToJSON;
@@ -4176,7 +4241,13 @@ begin
   if FStringBufferMode then
   begin
     {$IFDEF USE_JSONSTRINGBUILDER}
-    FStringBuffer.FlushToBytes(Bytes, FEncoding);
+    if FStream is TJsonMemoryStream then
+    begin
+      FStringBuffer.FlushToStream(TJsonMemoryStream(FStream), FEncoding);
+      Exit;
+    end
+    else
+      FStringBuffer.FlushToBytes(Bytes, FEncoding);
     {$ELSE}
     Bytes := FEncoding.GetBytes(FStringBuffer);
     FStringBuffer := '';
@@ -5919,7 +5990,7 @@ procedure TJsonOutputWriter.TJsonStringBuilder.FlushToBytes(var Bytes: TBytes; E
 var
   L: Integer;
 begin
-  if Len > 0 then
+  if FLen > 0 then
   begin
     // Use the "strict protected" methods that use PChar instead of TCharArray what allows us to
     // use FData directly without converting it to a dynamic TCharArray (and skipping the sanity
@@ -5931,6 +6002,31 @@ begin
   end
   else
     Bytes := nil;
+  FLen := 0; // "clear" the buffer but don't release the memory
+end;
+
+procedure TJsonOutputWriter.TJsonStringBuilder.FlushToStream(Stream: TMemoryStream; Encoding: TEncoding);
+var
+  L: Integer;
+  Idx, NewSize: NativeInt;
+begin
+  if FLen > 0 then
+  begin
+    // Use the "strict protected" methods that use PChar instead of TCharArray what allows us to
+    // use FData directly without converting it to a dynamic TCharArray (and skipping the sanity
+    // checks)
+    L := TEncodingStrictAccess(Encoding).GetByteCountEx(FData, FLen);
+    if L > 0 then
+    begin
+      Idx := TJsonMemoryStream(Stream).Position;
+      NewSize := Idx + L;
+      if NewSize > TJsonMemoryStream(Stream).Capacity then
+        TJsonMemoryStream(Stream).Capacity := NewSize;
+      TEncodingStrictAccess(Encoding).GetBytesEx(FData, FLen, @PByte(Stream.Memory)[Idx], L);
+      TJsonMemoryStream(Stream).SetPointer(Stream.Memory, NewSize);
+      Stream.Position := NewSize;
+    end;
+  end;
   FLen := 0; // "clear" the buffer but don't release the memory
 end;
 
@@ -6043,6 +6139,82 @@ begin
     end;
     FLen := LLen + Len;
   end;
+end;
+
+{$IFNDEF NEXTGEN}
+{ TJsonUTF8StringStream }
+
+constructor TJsonUTF8StringStream.Create;
+begin
+  inherited Create;
+  SetPointer(nil, 0);
+end;
+
+function TJsonUTF8StringStream.Realloc(var NewCapacity: Integer): Pointer;
+var
+  L: Integer;
+begin
+  if NewCapacity <> Capacity then
+  begin
+    if NewCapacity = 0 then
+      FDataString := ''
+    else
+    begin
+      L := Length(FDataString) * 2;
+      {$IFNDEF CPUX64}
+      if L > 1024 * 1024 * 1024 then
+      begin
+        // Memory fragmentation can become a problem, so allocate only the amount of memory that
+        // is needed
+        L := NewCapacity;
+      end
+      else
+      {$ENDIF ~CPUX64}
+      if L < NewCapacity then
+        L := NewCapacity;
+      NewCapacity := L;
+      SetLength(FDataString, L);
+    end;
+  end;
+  Result := Pointer(FDataString);
+end;
+{$ENDIF ~NEXTGEN}
+
+{ TJsonBytesStream }
+
+constructor TJsonBytesStream.Create;
+begin
+  inherited Create;
+  SetPointer(nil, 0);
+end;
+
+function TJsonBytesStream.Realloc(var NewCapacity: Integer): Pointer;
+var
+  L: Integer;
+begin
+  if NewCapacity <> Capacity then
+  begin
+    if NewCapacity = 0 then
+      FBytes := nil
+    else
+    begin
+      L := Length(FBytes) * 2;
+      {$IFNDEF CPUX64}
+      if L > 1024 * 1024 * 1024 then
+      begin
+        // Memory fragmentation can become a problem, so allocate only the amount of memory that
+        // is needed
+        L := NewCapacity;
+      end
+      else
+      {$ENDIF ~CPUX64}
+      if L < NewCapacity then
+        L := NewCapacity;
+      NewCapacity := L;
+      SetLength(FBytes, L);
+    end;
+  end;
+  Result := Pointer(FBytes);
 end;
 
 initialization
