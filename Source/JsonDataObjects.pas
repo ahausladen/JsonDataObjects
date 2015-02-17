@@ -2015,7 +2015,9 @@ begin
       AppendMethod(S)
     else
       EscapeStrToJSONStr(F, P, EndP, AppendMethod);
-  end;
+  end
+  else
+    AppendMethod('');
 end;
 
 class procedure TJsonBaseObject.EscapeStrToJSONStr(F, P, EndP: PChar; const AppendMethod: TWriterAppendMethod);
@@ -6034,6 +6036,7 @@ begin
   Inc(LLen);
 
   case S2L of
+    0: ;
     1: FData[LLen] := PChar(Pointer(S2))^;
     2: PLongWord(@FData[LLen])^ := PLongWord(Pointer(S2))^;
   else

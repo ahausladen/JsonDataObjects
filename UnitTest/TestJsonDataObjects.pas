@@ -44,6 +44,7 @@ type
     procedure TestToJSON;
     procedure TestToString;
     procedure TestDateTimeToJSON;
+    procedure TestEmptyString;
   end;
 
   TestTJsonArray = class(TTestCase)
@@ -1152,6 +1153,19 @@ begin
   TJsonBaseObject.JSONToDateTime('2015-02-14T22:58+0100');
 end;
 
+
+procedure TestTJsonBaseObject.TestEmptyString;
+var
+  Json: TJsonObject;
+begin
+  Json := TJsonObject.Create;
+  try
+    Json.S['Name'] := '';
+    CheckEqualsString('{"Name":""}', Json.ToJSON);
+  finally
+    Json.Free;
+  end;
+end;
 
 { TestTJsonArray }
 
