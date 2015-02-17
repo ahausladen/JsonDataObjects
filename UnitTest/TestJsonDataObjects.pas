@@ -1173,11 +1173,12 @@ var
   U: UTF8String;
   Bytes: TBytes;
   ExpectedBytes: TBytes;
-  S: string;
+  CompactS, S: string;
   I: Integer;
 begin
   B := TJsonBaseObject.ParseUtf8('{ "Key": "Value" }');
   try
+    // Compact=True
     U := B.ToUtf8JSON;
     B.ToUtf8JSON(Bytes);
     ExpectedBytes := TEncoding.UTF8.GetBytes('{"Key":"Value"}');
@@ -1188,19 +1189,52 @@ begin
     CheckEquals(Length(ExpectedBytes), Length(Bytes));
     CheckEqualsMem(@ExpectedBytes[0], Pointer(U), Length(U));
     CheckEqualsMem(@ExpectedBytes[0], @Bytes[0], Length(Bytes));
+
+    // Compact=False
+    U := B.ToUtf8JSON(False);
+    B.ToUtf8JSON(Bytes, False);
+    ExpectedBytes := TEncoding.UTF8.GetBytes(
+      '{' + JsonSerializationConfig.LineBreak +
+      JsonSerializationConfig.IndentChar + '"Key": "Value"' + JsonSerializationConfig.LineBreak +
+      '}' + JsonSerializationConfig.LineBreak
+    );
+    Check(Length(U) > 0);
+    Check(Length(Bytes) > 0);
+    CheckEquals(Length(ExpectedBytes), Length(U));
+    CheckEquals(Length(ExpectedBytes), Length(Bytes));
+    CheckEqualsMem(@ExpectedBytes[0], Pointer(U), Length(U));
+    CheckEqualsMem(@ExpectedBytes[0], @Bytes[0], Length(Bytes));
   finally
     B.Free;
   end;
 
-  S := '{';
+  // Test flush buffer
+  CompactS := '{';
   for I := 0 to 100000 do
-    S := S + '"Key' + IntToStr(I) + '":"Value",';
-  S := S + '"Key":"Value"}';
+    CompactS := CompactS + '"Key' + IntToStr(I) + '":"Value",';
+  CompactS := CompactS + '"Key":"Value"}';
 
-  B := TJsonBaseObject.Parse(S);
+  S := '{' + JsonSerializationConfig.LineBreak;
+  for I := 0 to 100000 do
+    S := S + JsonSerializationConfig.IndentChar + '"Key' + IntToStr(I) + '": "Value",' + JsonSerializationConfig.LineBreak;
+  S := S + JsonSerializationConfig.IndentChar + '"Key": "Value"' + JsonSerializationConfig.LineBreak +
+       '}' + JsonSerializationConfig.LineBreak;
+
+  B := TJsonBaseObject.Parse(CompactS);
   try
     U := B.ToUtf8JSON;
     B.ToUtf8JSON(Bytes);
+    ExpectedBytes := TEncoding.UTF8.GetBytes(CompactS);
+
+    Check(Length(U) > 0);
+    Check(Length(Bytes) > 0);
+    CheckEquals(Length(ExpectedBytes), Length(U));
+    CheckEquals(Length(ExpectedBytes), Length(Bytes));
+    CheckEqualsMem(@ExpectedBytes[0], Pointer(U), Length(U));
+    CheckEqualsMem(@ExpectedBytes[0], @Bytes[0], Length(Bytes));
+
+    U := B.ToUtf8JSON(False);
+    B.ToUtf8JSON(Bytes, False);
     ExpectedBytes := TEncoding.UTF8.GetBytes(S);
 
     Check(Length(U) > 0);

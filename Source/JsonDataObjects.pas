@@ -51,9 +51,6 @@ unit JsonDataObjects;
 // Sanity checks all array index accesses and raise an EListError exception.
 {$DEFINE CHECK_ARRAY_INDEX}
 
-// Use the special TJsonStringBuilder instead of native string concatination.
-{$DEFINE USE_JSONSTRINGBUILDER}
-
 // JSON allows the slash to be escaped. This is only necessary if you plan to put the JSON string
 // into a <script>-Tag because then "</" can't be used and must be escaped to "<\/". This switch
 // enables the special handling for "</" but makes the parser slightly slower.
@@ -137,38 +134,38 @@ type
     public
       procedure Init;
       procedure Done;
-      procedure DoneToString(var S: string);
-      procedure FlushToBytes(var Bytes: TBytes; Encoding: TEncoding);
-      procedure FlushToStream(Stream: TMemoryStream; Encoding: TEncoding);
+      procedure DoneConvertToString(var S: string);
+      function FlushToBytes(var Bytes: PByte; var Size: NativeInt; Encoding: TEncoding): NativeInt;
+      procedure FlushToMemoryStream(Stream: TMemoryStream; Encoding: TEncoding);
+      procedure FlushToStringBuffer(var Buffer: TJsonStringBuilder);
+      procedure FlushToString(var S: string);
 
       function Append(const S: string): PJsonStringBuilder; overload;
       procedure Append(P: PChar; Len: Integer); overload;
-      procedure Append3(Ch1: Char; const S2, S3: string);
+      procedure Append2(const S1: string; S2: PChar; S2Len: Integer);
+      procedure Append3(Ch1: Char; const S2, S3: string); overload;
+      procedure Append3(Ch1: Char; const S2: string; Ch3: Char); overload;
 
       property Len: Integer read FLen;
       property Data: PChar read FData;
     end;
   private
     FLastType: TLastType;
-    FStringBufferMode: Boolean;
-    {$IFDEF USE_JSONSTRINGBUILDER}
+    FCompact: Boolean;
     FStringBuffer: TJsonStringBuilder;
-    {$ELSE}
-    FStringBuffer: string;         // used when building the compact format
-    {$ENDIF USE_JSONSTRINGBUILDER}
-    FLines: TStrings;              // used for building the human readable format
-    FLastLine: string;
-    FLinesBufferLen: Integer;
-    FLineBreakLen: Integer;
+    FLines: TStrings;
+    FLastLine: TJsonStringBuilder;
 
+    FStreamEncodingBuffer: PByte;
+    FStreamEncodingBufferLen: NativeInt;
     FStream: TStream;                // used when writing to a stream
     FEncoding: TEncoding;            // used when writing to a stream
 
-    FIndents: array of string;     // buffer for line indention strings
-    FIndent: Integer;              // current indention level
+    FIndents: array of string;       // buffer for line indention strings
+    FIndent: Integer;                // current indention level
 
-    procedure StreamFlushPossible;   // checks if StreamFlush must be called
-    procedure StreamFlush;           // writes the buffer to the stream
+    procedure StreamFlushPossible; inline; // checks if StreamFlush must be called
+    procedure StreamFlush;                 // writes the buffer to the stream
     procedure ExpandIndents;
     procedure AppendLine(AppendOn: TLastType; const S: string); overload;
     procedure AppendLine(AppendOn: TLastType; P: PChar; Len: Integer); overload;
@@ -813,10 +810,10 @@ type
     constructor Create(const S: PChar; Len: Integer);
   end;
 
-  TJsonMemoryStream = class(TMemoryStream);
+  TMemoryStreamAccess = class(TMemoryStream);
 
   {$IFNDEF NEXTGEN}
-  TJsonUTF8StringStream = class(TJsonMemoryStream)
+  TJsonUTF8StringStream = class(TMemoryStream)
   private
     FDataString: UTF8String;
   protected
@@ -827,7 +824,7 @@ type
   end;
   {$ENDIF ~NEXTGEN}
 
-  TJsonBytesStream = class(TJsonMemoryStream)
+  TJsonBytesStream = class(TMemoryStream)
   private
     FBytes: TBytes;
   protected
@@ -4131,39 +4128,32 @@ end;
 
 procedure TJsonOutputWriter.Init(ACompact: Boolean; AStream: TStream; AEncoding: TEncoding; ALines: TStrings);
 begin
+  FCompact := ACompact;
   FStream := AStream;
   FEncoding := AEncoding;
-  if ACompact then
+
+  if ALines <> nil then
   begin
-    FStringBufferMode := True;
-    {$IFDEF USE_JSONSTRINGBUILDER}
-    FStringBuffer.Init;
-    {$ELSE}
-    FStringBuffer := '';
-    {$ENDIF USE_JSONSTRINGBUILDER}
-    FLines := nil;
-    FLastLine := '';
+    FCompact := False; // there is no compact version for TStrings
+    FLines := ALines;
   end
   else
   begin
-    FStringBufferMode := False;
-    FLastLine := '';
-    FLinesBufferLen := 0;
-    if ALines <> nil then
-    begin
-      FLines := ALines;
-      FLineBreakLen := Length(FLines.LineBreak);
-    end
-    else
-    begin
-      FLines := TStringList.Create;
-      FLines.LineBreak := JsonSerializationConfig.LineBreak;
-      FLineBreakLen := Length(JsonSerializationConfig.LineBreak);
-    end;
+    FStreamEncodingBuffer := nil;
+    FStreamEncodingBufferLen := 0;
+    FLines := nil;
+    FStringBuffer.Init;
+  end;
+
+  if not ACompact then
+  begin
+    FLastLine.Init;
+
     FIndent := 0;
     FLastType := ltInitial;
 
-    // setup some initial indention levels
+    // Set up some initial indention levels
+    // TODO change to one buffer with #0 vs. IndentChar
     SetLength(FIndents, 5);
     FIndents[0] := '';
     FIndents[1] := JsonSerializationConfig.IndentChar;
@@ -4175,115 +4165,89 @@ end;
 
 function TJsonOutputWriter.Done: string;
 begin
-  if FStringBufferMode then
-  begin
-    {$IFDEF USE_JSONSTRINGBUILDER}
-    FStringBuffer.DoneToString(Result);
-    {$ELSE}
-    Result := FStringBuffer;
-    FStringBuffer := '';
-    {$ENDIF USE_JSONSTRINGBUILDER}
-  end
-  else
+  if not FCompact then
   begin
     FlushLastLine;
-    Result := FLines.Text;
-    FLines.Free;
     FIndents := nil;
+    FLastLine.Done;
   end;
+
+  if FLines = nil then
+    FStringBuffer.DoneConvertToString(Result);
 end;
 
 procedure TJsonOutputWriter.LinesDone;
 begin
   FIndents := nil;
   FlushLastLine;
-  FLastLine := '';
+  FLastLine.Done;
 end;
 
 procedure TJsonOutputWriter.StreamDone;
 begin
-  if FStream <> nil then
+  if not FCompact then
   begin
-    if FLines <> nil then
-      FlushLastLine;
-    StreamFlush;
+    FlushLastLine;
+    FIndents := nil;
+    FLastLine.Done;
   end;
 
-  if FStringBufferMode then
-  begin
-    {$IFDEF USE_JSONSTRINGBUILDER}
-    FStringBuffer.Done;
-    {$ELSE}
-    FStringBuffer := '';
-    {$ENDIF USE_JSONSTRINGBUILDER}
-  end
-  else
-  begin
-    FLines.Free;
-    FIndents := nil;
-  end;
+  if FStream <> nil then
+    StreamFlush;
+  if FStreamEncodingBuffer <> nil then
+    FreeMem(FStreamEncodingBuffer);
+  FStringBuffer.Done;
 end;
 
 procedure TJsonOutputWriter.FlushLastLine;
+var
+  S: Pointer;
 begin
-  if FLastLine <> '' then
+  if FLastLine.Len > 0 then
   begin
-    FLines.Add(FLastLine);
-    Inc(FLinesBufferLen, Length(FLastLine) + FLineBreakLen);
-    FLastLine := '';
+    if FLines <> nil then
+    begin
+      S := nil;
+      FLastLine.FlushToString(string(S));
+      FLines.Add(string(S));
+      string(S) := '';
+    end
+    else
+    begin
+      FLastLine.FlushToStringBuffer(FStringBuffer);
+      FStringBuffer.Append(JsonSerializationConfig.LineBreak);
+    end;
   end;
 end;
 
 procedure TJsonOutputWriter.StreamFlush;
 var
-  Bytes: TBytes;
+  Size: NativeInt;
 begin
-  if FStringBufferMode then
+  if FStringBuffer.Len > 0 then
   begin
-    {$IFDEF USE_JSONSTRINGBUILDER}
-    if FStream is TJsonMemoryStream then
+    if FEncoding = TEncoding.Unicode then
     begin
-      FStringBuffer.FlushToStream(TJsonMemoryStream(FStream), FEncoding);
-      Exit;
+      FStream.Write(FStringBuffer.Data[0], FStringBuffer.Len);
+      FStringBuffer.FLen := 0;
     end
+    else if FStream is TMemoryStream then
+      FStringBuffer.FlushToMemoryStream(TMemoryStream(FStream), FEncoding)
     else
-      FStringBuffer.FlushToBytes(Bytes, FEncoding);
-    {$ELSE}
-    Bytes := FEncoding.GetBytes(FStringBuffer);
-    FStringBuffer := '';
-    {$ENDIF USE_JSONSTRINGBUILDER}
-  end
-  else
-  begin
-    Bytes := FEncoding.GetBytes(FLines.Text);
-    FLines.Clear;
-    FLinesBufferLen := 0;
+    begin
+      Size := FStringBuffer.FlushToBytes(FStreamEncodingBuffer, FStreamEncodingBufferLen, FEncoding);
+      if Size > 0 then
+        FStream.Write(FStreamEncodingBuffer[0], Size);
+    end;
   end;
-  if Bytes <> nil then
-    FStream.Write(Bytes[0], Length(Bytes));
 end;
 
 procedure TJsonOutputWriter.StreamFlushPossible;
 const
   MaxBuffer = 64 * 1024;
 begin
-  if FStream <> nil then
-  begin
-    if FStringBufferMode then
-    begin
-      {$IFDEF USE_JSONSTRINGBUILDER}
-      if FStringBuffer.Len >= MaxBuffer then
-      {$ELSE}
-      if Length(FStringBuffer) >= MaxBuffer then
-      {$ENDIF USE_JSONSTRINGBUILDER}
-        StreamFlush;
-    end
-    else
-    begin
-      if FLinesBufferLen >= MaxBuffer then
-        StreamFlush;
-    end;
-  end;
+  if (FStream <> nil) and (FStringBuffer.Len >= MaxBuffer) then
+    StreamFlush;
 end;
 
 procedure TJsonOutputWriter.ExpandIndents;
@@ -4295,46 +4259,32 @@ end;
 procedure TJsonOutputWriter.AppendLine(AppendOn: TLastType; const S: string);
 begin
   if FLastType = AppendOn then
-    FLastLine := FLastLine + S
+    FLastLine.Append(S)
   else
   begin
     FlushLastLine;
     StreamFlushPossible;
-    FLastLine := FIndents[FIndent] + S;
+    FLastLine.Append2(FIndents[FIndent], PChar(Pointer(S)), Length(S));
   end;
 end;
 
 procedure TJsonOutputWriter.AppendLine(AppendOn: TLastType; P: PChar; Len: Integer);
-var
-  L: Integer;
 begin
   if FLastType = AppendOn then
-  begin
-    L := Length(FLastLine);
-    SetLength(FLastLine, L + Len);
-    Move(P[0], PChar(Pointer(FLastLine))[L], Len * SizeOf(Char));
-  end
+    FLastLine.Append(P, Len)
   else
   begin
     FlushLastLine;
     StreamFlushPossible;
-    L := Length(FIndents[FIndent]);
-    SetLength(FLastLine, L + Len);
-    if L > 0 then
-      Move(FIndents[FIndent], PChar(Pointer(FLastLine))[0], L * SizeOf(Char));
-    Move(P[0], PChar(Pointer(FLastLine))[L], Len * SizeOf(Char));
+    FLastLine.Append2(FIndents[FIndent], P, Len);
   end;
 end;
 
 procedure TJsonOutputWriter.Indent(const S: string);
 begin
-  if FStringBufferMode then
+  if FCompact then
   begin
-    {$IFDEF USE_JSONSTRINGBUILDER}
     FStringBuffer.Append(S);
-    {$ELSE}
-    FStringBuffer := FStringBuffer + S;
-    {$ENDIF USE_JSONSTRINGBUILDER}
     StreamFlushPossible;
   end
   else
@@ -4349,13 +4299,9 @@ end;
 
 procedure TJsonOutputWriter.Unindent(const S: string);
 begin
-  if FStringBufferMode then
+  if FCompact then
   begin
-    {$IFDEF USE_JSONSTRINGBUILDER}
     FStringBuffer.Append(S);
-    {$ELSE}
-    FStringBuffer := FStringBuffer + S;
-    {$ENDIF USE_JSONSTRINGBUILDER}
     StreamFlushPossible;
   end
   else
@@ -4371,39 +4317,25 @@ procedure TJsonOutputWriter.AppendIntro(const S: string);
 const
   sQuoteCharColon = '":';
 begin
-  if FStringBufferMode then
+  if FCompact then
   begin
-    {$IFDEF USE_JSONSTRINGBUILDER}
     FStringBuffer.Append3(sQuoteChar, S, sQuoteCharColon);
-    {$ELSE}
-    FStringBuffer := FStringBuffer + sQuoteChar + S + sQuoteCharColon;
-    {$ENDIF USE_JSONSTRINGBUILDER}
     StreamFlushPossible;
   end
   else
   begin
     FlushLastLine;
     StreamFlushPossible;
-    FLastLine := FIndents[FIndent] + sQuoteChar + S + '": ';
+    FLastLine.Append(FIndents[FIndent]).Append3(sQuoteChar, S, '": ');
     FLastType := ltIntro;
   end;
 end;
 
 procedure TJsonOutputWriter.AppendValue(P: PChar; Len: Integer);
-{$IFNDEF USE_JSONSTRINGBUILDER}
-var
-  L: Integer;
-{$ENDIF ~USE_JSONSTRINGBUILDER}
 begin
-  if FStringBufferMode then
+  if FCompact then
   begin
-    {$IFDEF USE_JSONSTRINGBUILDER}
     FStringBuffer.Append(P, Len);
-    {$ELSE}
-    L := Length(FStringBuffer);
-    SetLength(FStringBuffer, L + Len);
-    Move(P[0], PChar(Pointer(FStringBuffer))[L], Len * SizeOf(Char));
-    {$ENDIF USE_JSONSTRINGBUILDER}
     StreamFlushPossible;
   end
   else
@@ -4415,13 +4347,9 @@ end;
 
 procedure TJsonOutputWriter.AppendValue(const S: string);
 begin
-  if FStringBufferMode then
+  if FCompact then
   begin
-    {$IFDEF USE_JSONSTRINGBUILDER}
     FStringBuffer.Append(S);
-    {$ELSE}
-    FStringBuffer := FStringBuffer + S;
-    {$ENDIF USE_JSONSTRINGBUILDER}
     StreamFlushPossible;
   end
   else
@@ -4433,24 +4361,20 @@ end;
 
 procedure TJsonOutputWriter.AppendStrValue(const S: string);
 begin
-  if FStringBufferMode then
+  if FCompact then
   begin
-    {$IFDEF USE_JSONSTRINGBUILDER}
     FStringBuffer.Append3(sQuoteChar, S, sQuoteChar);
-    {$ELSE}
-    FStringBuffer := FStringBuffer + sQuoteChar + S + sQuoteChar;
-    {$ENDIF USE_JSONSTRINGBUILDER}
     StreamFlushPossible;
   end
   else
   begin
     if FLastType = ltIntro then
-      FLastLine := FLastLine + sQuoteChar + S + sQuoteChar
+      FLastLine.Append3(sQuoteChar, S, sQuoteChar)
     else
     begin
       FlushLastLine;
       StreamFlushPossible;
-      FLastLine := FIndents[FIndent] + sQuoteChar + S + sQuoteChar;
+      FLastLine.Append(FIndents[FIndent]).Append3(sQuoteChar, S, sQuoteChar);
     end;
     FLastType := ltValue;
   end;
@@ -4458,24 +4382,20 @@ end;
 
 procedure TJsonOutputWriter.AppendSeparator(const S: string);
 begin
-  if FStringBufferMode then
+  if FCompact then
   begin
-    {$IFDEF USE_JSONSTRINGBUILDER}
     FStringBuffer.Append(S);
-    {$ELSE}
-    FStringBuffer := FStringBuffer + S;
-    {$ENDIF USE_JSONSTRINGBUILDER}
     StreamFlushPossible;
   end
   else
   begin
     if FLastType in [ltValue, ltUnindent] then
-      FLastLine := FLastLine + S
+      FLastLine.Append(S)
     else
     begin
       FlushLastLine;
       StreamFlushPossible;
-      FLastLine := FIndents[FIndent] + S;
+      FLastLine.Append2(FIndents[FIndent], PChar(Pointer(S)), Length(S));
     end;
     FLastType := ltSeparator;
   end;
@@ -5965,7 +5885,7 @@ begin
   end;
 end;
 
-procedure TJsonOutputWriter.TJsonStringBuilder.DoneToString(var S: string);
+procedure TJsonOutputWriter.TJsonStringBuilder.DoneConvertToString(var S: string);
 var
   StrP: PStrRec;
   P: PChar;
@@ -5986,26 +5906,30 @@ begin
   end;
 end;
 
-procedure TJsonOutputWriter.TJsonStringBuilder.FlushToBytes(var Bytes: TBytes; Encoding: TEncoding);
-var
-  L: Integer;
+function TJsonOutputWriter.TJsonStringBuilder.FlushToBytes(var Bytes: PByte; var Size: NativeInt; Encoding: TEncoding): NativeInt;
 begin
   if FLen > 0 then
   begin
     // Use the "strict protected" methods that use PChar instead of TCharArray what allows us to
     // use FData directly without converting it to a dynamic TCharArray (and skipping the sanity
     // checks)
-    L := TEncodingStrictAccess(Encoding).GetByteCountEx(FData, FLen);
-    SetLength(Bytes, L);
-    if L > 0 then
-      TEncodingStrictAccess(Encoding).GetBytesEx(FData, FLen, @Bytes[0], L);
+    Result := TEncodingStrictAccess(Encoding).GetByteCountEx(FData, FLen);
+    if Result > 0 then
+    begin
+      if Result > Size then
+      begin
+        Size := (Result + 4095) and not 4095;
+        ReallocMem(Bytes, Size);
+      end;
+      TEncodingStrictAccess(Encoding).GetBytesEx(FData, FLen, Bytes, Result);
+    end;
+    FLen := 0; // "clear" the buffer but don't release the memory
   end
   else
-    Bytes := nil;
-  FLen := 0; // "clear" the buffer but don't release the memory
+    Result := 0;
 end;
 
-procedure TJsonOutputWriter.TJsonStringBuilder.FlushToStream(Stream: TMemoryStream; Encoding: TEncoding);
+procedure TJsonOutputWriter.TJsonStringBuilder.FlushToMemoryStream(Stream: TMemoryStream; Encoding: TEncoding);
 var
   L: Integer;
   Idx, NewSize: NativeInt;
@@ -6018,12 +5942,14 @@ begin
     L := TEncodingStrictAccess(Encoding).GetByteCountEx(FData, FLen);
     if L > 0 then
     begin
-      Idx := TJsonMemoryStream(Stream).Position;
+      // Directly convert into the TMemoryStream.Memory buffer
+      Idx := Stream.Position;
       NewSize := Idx + L;
-      if NewSize > TJsonMemoryStream(Stream).Capacity then
-        TJsonMemoryStream(Stream).Capacity := NewSize;
+      if NewSize > TMemoryStreamAccess(Stream).Capacity then
+        TMemoryStreamAccess(Stream).Capacity := NewSize;
+
       TEncodingStrictAccess(Encoding).GetBytesEx(FData, FLen, @PByte(Stream.Memory)[Idx], L);
-      TJsonMemoryStream(Stream).SetPointer(Stream.Memory, NewSize);
+      TMemoryStreamAccess(Stream).SetPointer(Stream.Memory, NewSize);
       Stream.Position := NewSize;
     end;
   end;
@@ -6069,38 +5995,6 @@ begin
   FData := PChar(PByte(StrP) + SizeOf(TStrRec));
 end;
 
-procedure TJsonOutputWriter.TJsonStringBuilder.Append3(Ch1: Char; const S2, S3: string);
-var
-  L, S2L, S3L, LLen: Integer;
-begin
-  LLen := FLen;
-  S2L := Length(S2);
-  S3L := Length(S3);
-  L := 1 + S2L + S3L;
-  if LLen + L >= FCapacity then
-    Grow(LLen + L);
-
-  FData[LLen] := Ch1;
-  Inc(LLen);
-
-  case S2L of
-    0: ;
-    1: FData[LLen] := PChar(Pointer(S2))^;
-    2: PLongWord(@FData[LLen])^ := PLongWord(Pointer(S2))^;
-  else
-    Move(PChar(Pointer(S2))[0], FData[LLen], S2L * SizeOf(Char));
-  end;
-  Inc(LLen, S2L);
-
-  case S3L of
-    1: FData[LLen] := PChar(Pointer(S3))^;
-    2: PLongWord(@FData[LLen])^ := PLongWord(Pointer(S3))^;
-  else
-    Move(PChar(Pointer(S3))[0], FData[LLen], S3L * SizeOf(Char));
-  end;
-  FLen := LLen + S3L;
-end;
-
 function TJsonOutputWriter.TJsonStringBuilder.Append(const S: string): PJsonStringBuilder;
 var
   L, LLen: Integer;
@@ -6141,9 +6035,108 @@ begin
   end;
 end;
 
-{$IFNDEF NEXTGEN}
+procedure TJsonOutputWriter.TJsonStringBuilder.Append2(const S1: string; S2: PChar; S2Len: Integer);
+var
+  L, S1Len, LLen: Integer;
+begin
+  LLen := FLen;
+  S1Len := Length(S1);
+  L := S1Len + S2Len;
+  if LLen + L >= FCapacity then
+    Grow(LLen + L);
+
+  case S1Len of
+    0: ;
+    1: FData[LLen] := PChar(Pointer(S1))^;
+    2: PLongWord(@FData[LLen])^ := PLongWord(Pointer(S1))^;
+  else
+    Move(PChar(Pointer(S1))[0], FData[LLen], S1Len * SizeOf(Char));
+  end;
+  Inc(LLen, S1Len);
+
+  case S2Len of
+    0: ;
+    1: FData[LLen] := S2^;
+    2: PLongWord(@FData[LLen])^ := PLongWord(Pointer(S2))^;
+  else
+    Move(S2[0], FData[LLen], S2Len * SizeOf(Char));
+  end;
+  FLen := LLen + S2Len;
+end;
+
+procedure TJsonOutputWriter.TJsonStringBuilder.Append3(Ch1: Char; const S2, S3: string);
+var
+  L, S2Len, S3Len, LLen: Integer;
+begin
+  LLen := FLen;
+  S2Len := Length(S2);
+  S3Len := Length(S3);
+  L := 1 + S2Len + S3Len;
+  if LLen + L >= FCapacity then
+    Grow(LLen + L);
+
+  FData[LLen] := Ch1;
+  Inc(LLen);
+
+  case S2Len of
+    0: ;
+    1: FData[LLen] := PChar(Pointer(S2))^;
+    2: PLongWord(@FData[LLen])^ := PLongWord(Pointer(S2))^;
+  else
+    Move(PChar(Pointer(S2))[0], FData[LLen], S2Len * SizeOf(Char));
+  end;
+  Inc(LLen, S2Len);
+
+  case S3Len of
+    1: FData[LLen] := PChar(Pointer(S3))^;
+    2: PLongWord(@FData[LLen])^ := PLongWord(Pointer(S3))^;
+  else
+    Move(PChar(Pointer(S3))[0], FData[LLen], S3Len * SizeOf(Char));
+  end;
+  FLen := LLen + S3Len;
+end;
+
+procedure TJsonOutputWriter.TJsonStringBuilder.Append3(Ch1: Char; const S2: string; Ch3: Char);
+var
+  L, S2Len, LLen: Integer;
+begin
+  LLen := FLen;
+  S2Len := Length(S2);
+  L := 2 + S2Len;
+  if LLen + L >= FCapacity then
+    Grow(LLen + L);
+
+  FData[LLen] := Ch1;
+  Inc(LLen);
+
+  case S2Len of
+    0: ;
+    1: FData[LLen] := PChar(Pointer(S2))^;
+    2: PLongWord(@FData[LLen])^ := PLongWord(Pointer(S2))^;
+  else
+    Move(PChar(Pointer(S2))[0], FData[LLen], S2Len * SizeOf(Char));
+  end;
+  Inc(LLen, S2Len);
+
+  FData[LLen] := Ch1;
+  FLen := LLen + 1;
+end;
+
+procedure TJsonOutputWriter.TJsonStringBuilder.FlushToStringBuffer(var Buffer: TJsonStringBuilder);
+begin
+  Buffer.Append(FData, FLen);
+  FLen := 0;
+end;
+
+procedure TJsonOutputWriter.TJsonStringBuilder.FlushToString(var S: string);
+begin
+  SetString(S, FData, FLen);
+  FLen := 0;
+end;
+
 { TJsonUTF8StringStream }
 
+{$IFNDEF NEXTGEN}
 constructor TJsonUTF8StringStream.Create;
 begin
   inherited Create;
