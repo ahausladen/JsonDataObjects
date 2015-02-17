@@ -1848,54 +1848,6 @@ begin
     Result := InternIntToText(Cardinal(Value), False, EndP);
 end;
 
-(*function IntToText(EndP: PChar; Value: Integer): PChar;
-const
-  MinIntText = '-2147483648';
-var
-  Remainder: Integer;
-  Neg: Boolean;
-begin
-  Result := EndP;
-  if Value = Low(Integer) then
-  begin
-    Dec(Result, 11);
-    Move(PChar(MinIntText)[0], Result[0], 11 * SizeOf(Char));
-    Exit;
-  end;
-
-  Neg := Value < 0;
-  if Neg then
-    Value := -Value;
-
-  while Value >= 65536 do
-  begin
-    //Quotient := Value div 100;
-    //Remainder := Value - (Quotient * 100);
-
-    Remainder := Value; // use as backup to safe a local variable
-    Value := Value div 100;
-    Remainder := Remainder - (Value shl 6 + Value shl 5 + Value shl 2);
-
-    Dec(Result, 2);
-    PLongWord(Result)^ := PLongWord(@DoubleDigits[Remainder])^;
-  end;
-
-  repeat
-    Remainder := Value; // use as backup to safe a local variable
-    Value := Integer(LongWord(Value * 52429) shr (16 + 3));
-    // Remainder := Value - (Quotient * 10)
-    Remainder := Remainder - (Value shl 3 + Value shl 1);
-    Dec(Result);
-    Result^ := DoubleDigits[Remainder][1];
-  until Value = 0;
-
-  if Neg then
-  begin
-    Dec(Result);
-    Result^ := '-';
-  end;
-end;*)
-
 function Int64ToText(Value: Int64; EndP: PChar): PChar;
 var
   Quotient: Int64;
