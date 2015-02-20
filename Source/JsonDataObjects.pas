@@ -117,6 +117,8 @@ type
 
   EJsonException = class(Exception);
   EJsonParserException = class(EJsonException);
+  EJsonCastException = class(EJsonException);
+  EJsonPathException = class(EJsonException);
 
   // TJsonOutputWriter is used to write the JSON data to a string, stream or TStrings in a compact
   // or human readable format.
@@ -264,16 +266,29 @@ type
     procedure SetObjectValue(const Value: TJsonObject);
 
     function GetArrayItem(Index: Integer): TJsonDataValueHelper; inline;
-    function GetArrayCount: Integer;
-    function GetObject(const Name: string): TJsonDataValueHelper; inline;
+    function GetArrayCount: Integer; inline;
+
+    function GetObjectString(const Name: string): string; inline;
+    function GetObjectInt(const Name: string): Integer; inline;
+    function GetObjectLong(const Name: string): Int64; inline;
+    function GetObjectFloat(const Name: string): Double; inline;
+    function GetObjectBool(const Name: string): Boolean; inline;
     function GetArray(const Name: string): TJsonArray; inline;
-    procedure SetArray(const Name: string; const AValue: TJsonArray);
+    function GetObject(const Name: string): TJsonDataValueHelper; inline;
+    procedure SetObjectString(const Name, Value: string); inline;
+    procedure SetObjectInt(const Name: string; const Value: Integer); inline;
+    procedure SetObjectLong(const Name: string; const Value: Int64); inline;
+    procedure SetObjectFloat(const Name: string; const Value: Double); inline;
+    procedure SetObjectBool(const Name: string; const Value: Boolean); inline;
+    procedure SetArray(const Name: string; const AValue: TJsonArray); inline;
+    procedure SetObject(const Name: string; const Value: TJsonDataValueHelper); inline;
+
+    function GetObjectPath(const Name: string): TJsonDataValueHelper; inline;
+    procedure SetObjectPath(const Name: string; const Value: TJsonDataValueHelper); inline;
 
     function GetTyp: TJsonDataType;
     procedure ResolveName;
     class procedure SetInternValue(Item: PJsonDataValue; const Value: TJsonDataValueHelper); static;
-  private
-    procedure SetObject(const Name: string; const Value: TJsonDataValueHelper);
   public
     class operator Implicit(const Value: string): TJsonDataValueHelper; overload;
     class operator Implicit(const Value: TJsonDataValueHelper): string; overload;
@@ -305,10 +320,17 @@ type
     // Access to array items
     property Items[Index: Integer]: TJsonDataValueHelper read GetArrayItem;
 
+    property S[const Name: string]: string read GetObjectString write SetObjectString;      // returns '' if property doesn't exist, auto type-cast except for array/object
+    property I[const Name: string]: Integer read GetObjectInt write SetObjectInt;           // return 0 if property doesn't exist, auto type-cast except for array/object
+    property L[const Name: string]: Int64 read GetObjectLong write SetObjectLong;           // return 0 if property doesn't exist, auto type-cast except for array/object
+    property F[const Name: string]: Double read GetObjectFloat write SetObjectFloat;        // return 0 if property doesn't exist, auto type-cast except for array/object
+    property B[const Name: string]: Boolean read GetObjectBool write SetObjectBool;         // return false if property doesn't exist, auto type-cast with "<>'true'" and "<>0" except for array/object
     // Used to auto create arrays
     property A[const Name: string]: TJsonArray read GetArray write SetArray;
     // Used to auto create objects and as default property where no Implicit operator matches
     property O[const Name: string]: TJsonDataValueHelper read GetObject write SetObject; default;
+
+    property Path[const Name: string]: TJsonDataValueHelper read GetObjectPath write SetObjectPath;
   private
     FData: record // hide the data from CodeInsight (bug in CodeInsight)
       FIntern: PJsonDataValue;
@@ -551,6 +573,12 @@ type
     procedure Grow;
     procedure InternApplyCapacity;
     procedure SetCapacity(const Value: Integer);
+    function GetPath(const NamePath: string): TJsonDataValueHelper;
+    procedure SetPath(const NamePath: string; const Value: TJsonDataValueHelper);
+    function IndexOfPChar(S: PChar; Len: Integer): Integer;
+    procedure PathError(P, EndP: PChar);
+    procedure PathNullError(P, EndP: PChar);
+    procedure PathIndexError(P, EndP: PChar; Count: Integer);
   protected
     procedure InternToJSON(var Writer: TJsonOutputWriter); override;
     function FindCaseInsensitiveItem(const ACaseInsensitiveName: string): PJsonDataValue;
@@ -591,6 +619,8 @@ type
     property B[const Name: string]: Boolean read GetBool write SetBool;         // return false if property doesn't exist, auto type-cast with "<>'true'" and "<>0" except for array/object
     property A[const Name: string]: TJsonArray read GetArray write SetArray;    // auto creates array on first access
     property O[const Name: string]: TJsonObject read GetObject write SetObject; // auto creates object on first access
+
+    property Path[const NamePath: string]: TJsonDataValueHelper read GetPath write SetPath;
 
     // Indexed access to the named properties
     property Names[Index: Integer]: string read GetName;
@@ -640,6 +670,9 @@ resourcestring
   RsInvalidHexNumber = 'Invalid hex number "%s"';
   RsTypeCastError = 'Cannot cast %s into %s';
   RsMissingClassInfo = 'Class "%s" doesn''t have type information. {$M+} was not specified';
+  RsInvalidJsonPath = 'Invalid JSON path "%s"';
+  RsJsonPathContainsNullValue = 'JSON path contains null value ("%s")';
+  RsJsonPathIndexError = 'JSON path index out of bounds (%d) "%s"';
   {$IFDEF USE_FAST_STRASG_FOR_INTERNAL_STRINGS}
     {$IFDEF DEBUG}
   //RsInternAsgStringUsageError = 'InternAsgString was called on a string literal';
@@ -2743,7 +2776,7 @@ const
     'null', 'String', 'Integer', 'Long', 'Float', 'Bool', 'Array', 'Object'
   );
 begin
-  raise EJsonException.CreateResFmt(@RsTypeCastError, [DataTypeNames[FTyp], DataTypeNames[ExpectedType]])
+  raise EJsonCastException.CreateResFmt(@RsTypeCastError, [DataTypeNames[FTyp], DataTypeNames[ExpectedType]])
         {$IFDEF HAS_RETURN_ADDRESS} at ReturnAddress{$ENDIF};
 end;
 
@@ -3517,6 +3550,26 @@ begin
   {$ENDIF USE_LAST_NAME_STRING_LITERAL_CACHE}
 end;
 
+function TJsonObject.IndexOfPChar(S: PChar; Len: Integer): Integer;
+var
+  P: PJsonStringArray;
+begin
+  P := FNames;
+  if Len = 0 then
+  begin
+    for Result := 0 to FCount - 1 do
+      if P[Result] = '' then
+        Exit;
+  end
+  else
+  begin
+    for Result := 0 to FCount - 1 do
+      if (Length(P[Result]) = Len) and CompareMem(S, Pointer(P[Result]), Len) then
+        Exit;
+  end;
+  Result := -1;
+end;
+
 function TJsonObject.IndexOf(const Name: string): Integer;
 var
   P: PJsonStringArray;
@@ -3939,9 +3992,176 @@ begin
   end;
 end;
 
-{$IFDEF USE_STRINGINTERN_FOR_NAMES}
+procedure TJsonObject.PathError(P, EndP: PChar);
+var
+  S: string;
+begin
+  System.SetString(S, P, EndP - P);
+  raise EJsonPathException.CreateResFmt(@RsInvalidJsonPath, [S]);
+end;
+
+procedure TJsonObject.PathNullError(P, EndP: PChar);
+var
+  S: string;
+begin
+  System.SetString(S, P, EndP - P);
+  raise EJsonPathException.CreateResFmt(@RsJsonPathContainsNullValue, [S]);
+end;
+
+procedure TJsonObject.PathIndexError(P, EndP: PChar; Count: Integer);
+var
+  S: string;
+begin
+  System.SetString(S, P, EndP - P);
+  raise EJsonPathException.CreateResFmt(@RsJsonPathIndexError, [Count, S]);
+end;
+
+function TJsonObject.GetPath(const NamePath: string): TJsonDataValueHelper;
+var
+  F, P, EndF, LastEndF: PChar;
+  Ch: Char;
+  Idx: Integer;
+  Obj: TJsonObject;
+  Arr: TJsonArray;
+  Item: PJsonDataValue;
+  S: string;
+begin
+  P := PChar(NamePath);
+  // empty string => Self
+  if P^ = #0 then
+  begin
+    Result := Self;
+    Exit;
+  end;
+
+  Result.FData.FIntern := nil;
+  Result.FData.FTyp := jdtNone;
+
+  Obj := Self;
+  Item := nil;
+  LastEndF := nil;
+  while True do
+  begin
+    F := P;
+
+    // fast forward
+    Ch := P^;
+    while not (Ch in [#0, '[', '.']) do
+    begin
+      Inc(P);
+      Ch := P^;
+    end;
+
+    EndF := P;
+    if F = EndF then
+      PathError(PChar(Pointer(NamePath)), P + 1);
+
+    Inc(P);
+    case Ch of
+      #0:
+        begin
+          if Obj <> nil then
+          begin
+            Idx := Obj.IndexOfPChar(F, EndF - F);
+            if Idx <> -1 then
+              Result.FData.FIntern := @Obj.FItems[Idx]
+            else
+            begin
+              Result.FData.FNameResolver := Obj;
+              System.SetString(Result.FData.FName, F, EndF - F);
+            end;
+          end
+          else
+            Result.FData.FIntern := Item;
+          Break;
+        end;
+
+      '.': // object access
+        begin
+          if Obj = nil then
+            PathNullError(PChar(Pointer(NamePath)), LastEndF);
+
+          Idx := Obj.IndexOfPChar(F, EndF - F);
+          if Idx <> -1 then
+            Obj := Obj.FItems[Idx].ObjectValue
+          else
+          begin
+            // auto create object
+            System.SetString(S, F, EndF - F);
+            Obj := Obj.InternAddObject(S);
+          end;
+        end;
+
+      '[': // array access
+        begin
+          if Obj = nil then
+            PathNullError(PChar(Pointer(NamePath)), LastEndF);
+
+          Idx := Obj.IndexOfPChar(F, EndF - F);
+          if Idx <> -1 then
+          begin
+            Arr := Obj.FItems[Idx].ArrayValue;
+            if Arr = nil then
+            begin
+              // Shouldn't happen => auto create array
+              Arr := TJsonArray.Create;
+              Obj.FItems[Idx].ArrayValue := Arr;
+            end;
+          end
+          else
+          begin
+            // auto create array
+            System.SetString(S, F, EndF - F);
+            Arr := Obj.InternAddArray(S);
+          end;
+          Ch := P^;
+          // parse array index
+          Idx := 0;
+          while Ch in ['0'..'9'] do
+          begin
+            Idx := Idx * 10 + (Word(Ch) - Ord('0'));
+            Inc(P);
+            Ch := P^;
+          end;
+
+          if P^ <> ']' then
+            PathError(PChar(Pointer(NamePath)), P + 1);
+          Inc(P);
+
+          if Idx >= Arr.Count then
+            PathIndexError(PChar(Pointer(NamePath)), P, Arr.Count); // P is already incremented
+          Item := @Arr.FItems[Idx];
+
+          if P^ = '.' then
+          begin
+            Inc(P);
+            Obj := Item.ObjectValue;
+            Item := nil;
+          end
+          else if P^ = #0 then
+          begin
+            // return array element
+            Result.FData.FIntern := Item;
+            Break;
+          end;
+        end;
+    end;
+    LastEndF := EndF;
+  end;
+end;
+
+procedure TJsonObject.SetPath(const NamePath: string; const Value: TJsonDataValueHelper);
+var
+  PathValue: TJsonDataValueHelper;
+begin
+  PathValue := Path[NamePath];
+  PathValue.ResolveName;
+  TJsonDataValueHelper.SetInternValue(PathValue.FData.FIntern, Value);
+end;
+
 { TStringIntern }
 
+{$IFDEF USE_STRINGINTERN_FOR_NAMES}
 procedure TStringIntern.Init;
 begin
   FCount := 0;
@@ -5813,9 +6033,39 @@ begin
   Result := ArrayValue.Count;
 end;
 
-procedure TJsonDataValueHelper.SetArray(const Name: string; const AValue: TJsonArray);
+procedure TJsonDataValueHelper.ResolveName;
 begin
-  ObjectValue.A[Name] := AValue;
+  if (FData.FIntern = nil) and (FData.FNameResolver <> nil) then
+  begin
+    FData.FIntern := FData.FNameResolver.RequireItem(FData.FName);
+    FData.FNameResolver := nil;
+    FData.FName := '';
+  end;
+end;
+
+function TJsonDataValueHelper.GetObjectString(const Name: string): string;
+begin
+  Result := ObjectValue.S[Name];
+end;
+
+function TJsonDataValueHelper.GetObjectInt(const Name: string): Integer;
+begin
+  Result := ObjectValue.I[Name];
+end;
+
+function TJsonDataValueHelper.GetObjectLong(const Name: string): Int64;
+begin
+  Result := ObjectValue.L[Name];
+end;
+
+function TJsonDataValueHelper.GetObjectFloat(const Name: string): Double;
+begin
+  Result := ObjectValue.F[Name];
+end;
+
+function TJsonDataValueHelper.GetObjectBool(const Name: string): Boolean;
+begin
+  Result := ObjectValue.B[Name];
 end;
 
 function TJsonDataValueHelper.GetArray(const Name: string): TJsonArray;
@@ -5828,19 +6078,49 @@ begin
   Result := ObjectValue.Values[Name];
 end;
 
+procedure TJsonDataValueHelper.SetObjectString(const Name, Value: string);
+begin
+  ObjectValue.S[Name] := Value;
+end;
+
+procedure TJsonDataValueHelper.SetObjectInt(const Name: string; const Value: Integer);
+begin
+  ObjectValue.I[Name] := Value;
+end;
+
+procedure TJsonDataValueHelper.SetObjectLong(const Name: string; const Value: Int64);
+begin
+  ObjectValue.L[Name] := Value;
+end;
+
+procedure TJsonDataValueHelper.SetObjectFloat(const Name: string; const Value: Double);
+begin
+  ObjectValue.F[Name] := Value;
+end;
+
+procedure TJsonDataValueHelper.SetObjectBool(const Name: string; const Value: Boolean);
+begin
+  ObjectValue.B[Name] := Value;
+end;
+
+procedure TJsonDataValueHelper.SetArray(const Name: string; const AValue: TJsonArray);
+begin
+  ObjectValue.A[Name] := AValue;
+end;
+
 procedure TJsonDataValueHelper.SetObject(const Name: string; const Value: TJsonDataValueHelper);
 begin
   ObjectValue.Values[Name] := Value;
 end;
 
-procedure TJsonDataValueHelper.ResolveName;
+function TJsonDataValueHelper.GetObjectPath(const Name: string): TJsonDataValueHelper;
 begin
-  if (FData.FIntern = nil) and (FData.FNameResolver <> nil) then
-  begin
-    FData.FIntern := FData.FNameResolver.RequireItem(FData.FName);
-    FData.FNameResolver := nil;
-    FData.FName := '';
-  end;
+  Result := ObjectValue.Path[Name];
+end;
+
+procedure TJsonDataValueHelper.SetObjectPath(const Name: string; const Value: TJsonDataValueHelper);
+begin
+  ObjectValue.Path[Name] := Value;
 end;
 
 { TEncodingStrictAccess }

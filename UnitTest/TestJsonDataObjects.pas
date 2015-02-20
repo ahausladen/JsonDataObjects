@@ -61,6 +61,12 @@ type
   end;
 
   TestTJsonObject = class(TTestCase)
+  private
+    FJson: TJsonObject;
+    procedure TestPathError1;
+    procedure TestPathError2;
+    procedure TestPathError3;
+    procedure TestPathError4;
   public
     procedure SetUp; override;
     procedure TearDown; override;
@@ -77,6 +83,7 @@ type
     procedure TestObjectAssign;
     procedure TestToSimpleObject;
     procedure TestFromSimpleObject;
+    procedure TestPathAccess;
   end;
 
 implementation
@@ -649,6 +656,29 @@ begin
 
     Check(A.Types[2] = jdtObject);
     CheckEquals(0, A.O[2].Count);
+  finally
+    B.Free;
+  end;
+
+  B := TJsonBaseObject.Parse('[ [1, 2, 3], [4, 5, 6] ]');
+  try
+    CheckNotNull(B, 'B <> nil');
+    CheckIs(B, TJsonArray);
+    A := B as TJsonArray;
+    CheckEquals(2, A.Count);
+    Check(A.Types[0] = jdtArray);
+    Check(A.Types[1] = jdtArray);
+    CheckEquals(3, A.A[0].Count);
+    CheckEquals(3, A.A[1].Count);
+
+    CheckEquals(1, A.A[0].I[0]);
+    CheckEquals(2, A.A[0].I[1]);
+    CheckEquals(3, A.A[0].I[2]);
+    CheckEquals(4, A.A[1].I[0]);
+    CheckEquals(5, A.A[1].I[1]);
+    CheckEquals(6, A.A[1].I[2]);
+
+    CheckEqualsString('[[1,2,3],[4,5,6]]', A.ToJSON);
   finally
     B.Free;
   end;
@@ -1847,6 +1877,68 @@ begin
     CheckEquals('{"MyObject":{"Data":"Hello"},"MySecondObject":{"Data":"Hello","SecondData":12}}', O.ToJSON);
   finally
     O.Free;
+  end;
+end;
+
+procedure TestTJsonObject.TestPathError1;
+begin
+  FJson.FromJSON('{"First":{"Second":{"Third":{"Value":"Hello"}}}}');
+  FJson.Path['First[0].'];
+end;
+
+procedure TestTJsonObject.TestPathError2;
+begin
+  FJson.FromJSON('{"First":{"Second":{"Third":{"Value":"Hello"}}}}');
+  FJson.Path['First[0].Second[0]'];
+end;
+
+procedure TestTJsonObject.TestPathError3;
+begin
+  FJson.FromJSON('{"First":{"Second":{"Third":{"Value":"Hello"}}}}');
+  FJson.Path['First..Second'];
+end;
+
+procedure TestTJsonObject.TestPathError4;
+begin
+  FJson.FromJSON('{"First":{"Second":{"Third":{"Value":"Hello"}}}}');
+  FJson.Path['.Second'];
+end;
+
+procedure TestTJsonObject.TestPathAccess;
+var
+  Json: TJsonObject;
+begin
+  Json := TJsonObject.Parse('{ "First" : { "Second" : { "Third" : { "Fourth" : { "Fifth" : { "Sixth" : "Hello World!" } } } } } }') as TJsonObject;
+  try
+    CheckEqualsString('Hello World!', Json.Path['First.Second.Third.Fourth.Fifth'].S['Sixth']);
+
+
+    Json.FromJSON(' { "First" : [ { "Second": { "Third": "Hello World!" } }, { "Fourth": "Nothing to see" }, "String" ] }');
+
+    CheckEqualsString('Hello World!', Json.Path['First'].Items[0].Path['Second.Third']);
+    CheckEqualsString('Nothing to see', Json.Path['First[1].Fourth']);
+    Check(Json.Path['First'].Typ = jdtArray);
+    Check(Json.Path['First[0]'].Typ = jdtObject);
+    Check(Json.Path['First[2]'].Typ = jdtString);
+    CheckEquals('String', Json.Path['First[2]']);
+
+    Check(Json.Path[''].ObjectValue = Json);
+    CheckFalse(Json.Contains(''));
+    Check(Json.Path['  '].ObjectValue <> Json);
+    CheckTrue(Json.Contains('  '));
+
+    Json.Clear;
+    Json.Path['First.Second.Third.Value'] := 'Hello';
+    CheckEquals('{"First":{"Second":{"Third":{"Value":"Hello"}}}}', Json.ToJSON());
+
+    FJson := Json;
+    CheckException(TestPathError1, EJsonCastException);
+    CheckException(TestPathError2, EJsonCastException);
+    CheckException(TestPathError3, EJsonPathException);
+    CheckException(TestPathError4, EJsonPathException);
+  finally
+    FJson := nil;
+    Json.Free;
   end;
 end;
 
