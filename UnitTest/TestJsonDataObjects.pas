@@ -58,6 +58,7 @@ type
     procedure TestAssign;
     procedure TestAdd;
     procedure TestInsert;
+    procedure TestExtract;
   end;
 
   TestTJsonObject = class(TTestCase)
@@ -84,6 +85,7 @@ type
     procedure TestToSimpleObject;
     procedure TestFromSimpleObject;
     procedure TestPathAccess;
+    procedure TestExtract;
   end;
 
 implementation
@@ -1443,6 +1445,38 @@ begin
   end;
 end;
 
+procedure TestTJsonArray.TestExtract;
+var
+  A, HelloA: TJsonArray;
+  Foo: TJsonObject;
+begin
+  Foo := nil;
+  HelloA := nil;
+  try
+    A := TJsonArray.Create;
+    try
+      A.AddObject.S['foo'] := 'bar';
+      A.AddArray.Add('Hello World!');
+      CheckEquals(2, A.Count);
+
+      Foo :=  A.ExtractObject(0);
+      CheckNotNull(Foo);
+      CheckEquals(1, A.Count);
+      HelloA := A.ExtractArray(0);
+      CheckNotNull(HelloA);
+      CheckEquals(0, A.Count);
+
+    finally
+      A.Free;
+    end;
+    CheckEquals(TJsonObject.ClassName, Foo.ClassName);
+    CheckEquals(TJsonArray.ClassName, HelloA.ClassName);
+  finally
+    Foo.Free;
+    HelloA.Free;
+  end;
+end;
+
 { TestTJsonObject }
 
 procedure TestTJsonObject.SetUp;
@@ -1939,6 +1973,38 @@ begin
   finally
     FJson := nil;
     Json.Free;
+  end;
+end;
+
+procedure TestTJsonObject.TestExtract;
+var
+  HelloA: TJsonArray;
+  Obj, Foo: TJsonObject;
+begin
+  Foo := nil;
+  HelloA := nil;
+  try
+    Obj := TJsonObject.Create;
+    try
+      Obj.O['foo'].S['value'] := 'bar';
+      Obj.A['bar'].Add('Hello World!');
+      CheckEquals(2, Obj.Count);
+
+      Foo :=  Obj.ExtractObject('foo');
+      CheckNotNull(Foo);
+      CheckEquals(1, Obj.Count);
+      HelloA := Obj.ExtractArray('bar');
+      CheckNotNull(HelloA);
+      CheckEquals(0, Obj.Count);
+
+    finally
+      Obj.Free;
+    end;
+    CheckEquals(TJsonObject.ClassName, Foo.ClassName);
+    CheckEquals(TJsonArray.ClassName, HelloA.ClassName);
+  finally
+    Foo.Free;
+    HelloA.Free;
   end;
 end;
 

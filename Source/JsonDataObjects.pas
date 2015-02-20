@@ -470,6 +470,10 @@ type
 
     procedure Clear;
     procedure Delete(Index: Integer);
+    // Extract removes the object/array from the array and transfers the ownership to the caller.
+    function Extract(Index: Integer): TJsonBaseObject;
+    function ExtractArray(Index: Integer): TJsonArray;
+    function ExtractObject(Index: Integer): TJsonObject;
     procedure Assign(ASource: TJsonArray);
 
     procedure Add(const AValue: string); overload;
@@ -591,6 +595,10 @@ type
     procedure Delete(Index: Integer);
     function IndexOf(const Name: string): Integer;
     function Contains(const Name: string): Boolean;
+    // Extract removes the object/array from the object and transfers the ownership to the caller.
+    function Extract(const Name: string): TJsonBaseObject;
+    function ExtractArray(const Name: string): TJsonArray;
+    function ExtractObject(const Name: string): TJsonObject;
 
     property Types[const Name: string]: TJsonDataType read GetType;
     property Values[const Name: string]: TJsonDataValueHelper read GetValue write SetValue; default;
@@ -2856,6 +2864,28 @@ begin
   end;
 end;
 
+function TJsonArray.Extract(Index: Integer): TJsonBaseObject;
+begin
+  if Items[Index].FTyp in [jdtNone, jdtArray, jdtObject] then
+  begin
+    Result := TJsonBaseObject(FItems[Index].FValue.O);
+    TJsonBaseObject(FItems[Index].FValue.O) := nil;
+  end
+  else
+    Result := nil;
+  Delete(Index);
+end;
+
+function TJsonArray.ExtractArray(Index: Integer): TJsonArray;
+begin
+  Result := Extract(Index) as TJsonArray;
+end;
+
+function TJsonArray.ExtractObject(Index: Integer): TJsonObject;
+begin
+  Result := Extract(Index) as TJsonObject;
+end;
+
 function TJsonArray.GetArray(Index: Integer): TJsonArray;
 begin
   {$IFDEF CHECK_ARRAY_INDEX}
@@ -3355,6 +3385,36 @@ begin
   Idx := IndexOf(Name);
   if Idx <> -1 then
     Delete(Idx);
+end;
+
+function TJsonObject.Extract(const Name: string): TJsonBaseObject;
+var
+  Index: Integer;
+begin
+  Index := IndexOf(Name);
+  if Index <> -1 then
+  begin
+    if FItems[Index].FTyp in [jdtNone, jdtArray, jdtObject] then
+    begin
+      Result := TJsonBaseObject(FItems[Index].FValue.O);
+      TJsonBaseObject(FItems[Index].FValue.O) := nil;
+    end
+    else
+      Result := nil;
+    Delete(Index);
+  end
+  else
+    Result := nil;
+end;
+
+function TJsonObject.ExtractArray(const Name: string): TJsonArray;
+begin
+  Result := Extract(Name) as TJsonArray;
+end;
+
+function TJsonObject.ExtractObject(const Name: string): TJsonObject;
+begin
+  Result := Extract(Name) as TJsonObject;
 end;
 
 function TJsonObject.AddItem(const Name: string): PJsonDataValue;
