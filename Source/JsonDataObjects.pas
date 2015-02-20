@@ -497,14 +497,6 @@ type
     property Types[Index: Integer]: TJsonDataType read GetType;
     property Values[Index: Integer]: TJsonDataValueHelper read GetValue write SetValue; default;
 
-    {property Strings[Index: Integer]: string read GetString write SetString;
-    property Ints[Index: Integer]: Integer read GetInt write SetInt;
-    property Longs[Index: Integer]: Int64 read GetLong write SetLong;
-    property Floats[Index: Integer]: Double read GetFloat write SetFloat;
-    property Bools[Index: Integer]: Boolean read GetBool write SetBool;
-    property Arrays[Index: Integer]: TJsonArray read GetArray write SetArray;
-    property Objects[Index: Integer]: TJsonObject read GetObject write SetObject;}
-
     // Short names
     property S[Index: Integer]: string read GetString write SetString;
     property I[Index: Integer]: Integer read GetInt write SetInt;
@@ -602,14 +594,6 @@ type
 
     property Types[const Name: string]: TJsonDataType read GetType;
     property Values[const Name: string]: TJsonDataValueHelper read GetValue write SetValue; default;
-
-    {property Strings[const Name: string]: string read GetString write SetString;
-    property Ints[const Name: string]: Integer read GetInt write SetInt;
-    property Longs[const Name: string]: Int64 read GetLong write SetLong;
-    property Floats[const Name: string]: Double read GetFloat write SetFloat;
-    property Bools[const Name: string]: Boolean read GetBool write SetBool;
-    property Arrays[const Name: string]: TJsonArray read GetArray write SetArray;
-    property Objects[const Name: string]: TJsonObject read GetObject write SetObject;}
 
     // Short names
     property S[const Name: string]: string read GetString write SetString;      // returns '' if property doesn't exist, auto type-cast except for array/object
