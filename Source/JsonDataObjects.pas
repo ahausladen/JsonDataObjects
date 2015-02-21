@@ -6321,11 +6321,14 @@ begin
   if MinLen < 256 then // begin with a 256 char buffer
     MinLen := 256;
   {$IFNDEF CPUX64}
-  if C > 1024 * 1024 * 1024 then
+  if C > 256 * 1024 * 1024 then
   begin
     // Memory fragmentation can become a problem, so allocate only the amount of memory that
     // is needed
-    C := MinLen;
+    C := FCapacity;
+    C := C + (C div 3);
+    if C < MinLen then
+      C := MinLen;
   end
   else
   {$ENDIF ~CPUX64}
@@ -6510,7 +6513,7 @@ begin
     begin
       L := Length(FDataString) * 2;
       {$IFNDEF CPUX64}
-      if L > 1024 * 1024 * 1024 then
+      if L > 256 * 1024 * 1024 then
       begin
         // Memory fragmentation can become a problem, so allocate only the amount of memory that
         // is needed
@@ -6548,7 +6551,7 @@ begin
     begin
       L := Length(FBytes) * 2;
       {$IFNDEF CPUX64}
-      if L > 1024 * 1024 * 1024 then
+      if L > 256 * 1024 * 1024 then
       begin
         // Memory fragmentation can become a problem, so allocate only the amount of memory that
         // is needed
