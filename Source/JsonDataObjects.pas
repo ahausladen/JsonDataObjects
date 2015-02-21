@@ -126,6 +126,9 @@ type
   private type
     TLastType = (ltInitial, ltIndent, ltUnindent, ltIntro, ltValue, ltSeparator);
 
+    PJsonStringArray = ^TJsonStringArray;
+    TJsonStringArray = array[0..MaxInt div SizeOf(string) - 1] of string;
+
     PJsonStringBuilder = ^TJsonStringBuilder;
     TJsonStringBuilder = record
     private
@@ -163,14 +166,15 @@ type
     FStream: TStream;                // used when writing to a stream
     FEncoding: TEncoding;            // used when writing to a stream
 
-    FIndents: array of string;       // buffer for line indention strings
+    FIndents: PJsonStringArray;      // buffer for line indention strings
+    FIndentsLen: Integer;
     FIndent: Integer;                // current indention level
 
     procedure StreamFlushPossible; inline; // checks if StreamFlush must be called
     procedure StreamFlush;                 // writes the buffer to the stream
     procedure ExpandIndents;
-    procedure AppendLine(AppendOn: TLastType; const S: string); overload;
-    procedure AppendLine(AppendOn: TLastType; P: PChar; Len: Integer); overload;
+    procedure AppendLine(AppendOn: TLastType; const S: string); overload; inline;
+    procedure AppendLine(AppendOn: TLastType; P: PChar; Len: Integer); overload; inline;
     procedure FlushLastLine;
   private // unit private
     procedure Init(ACompact: Boolean; AStream: TStream; AEncoding: TEncoding; ALines: TStrings);
@@ -4418,8 +4422,9 @@ begin
 
     // Set up some initial indention levels
     // TODO change to one buffer with #0 vs. IndentChar
-    SetLength(FIndents, 5);
-    FIndents[0] := '';
+    FIndents := AllocMem(5 * SizeOf(string));
+    FIndentsLen := 5;
+    //FIndents[0] := '';
     FIndents[1] := JsonSerializationConfig.IndentChar;
     FIndents[2] := FIndents[1] + JsonSerializationConfig.IndentChar;
     FIndents[3] := FIndents[2] + JsonSerializationConfig.IndentChar;
@@ -4432,7 +4437,7 @@ begin
   if not FCompact then
   begin
     FlushLastLine;
-    FIndents := nil;
+    FreeMem(FIndents);
     FLastLine.Done;
   end;
 
@@ -4442,7 +4447,7 @@ end;
 
 procedure TJsonOutputWriter.LinesDone;
 begin
-  FIndents := nil;
+  FreeMem(FIndents);
   FlushLastLine;
   FLastLine.Done;
 end;
@@ -4452,7 +4457,7 @@ begin
   if not FCompact then
   begin
     FlushLastLine;
-    FIndents := nil;
+    FreeMem(FIndents);
     FLastLine.Done;
   end;
 
@@ -4469,18 +4474,21 @@ var
 begin
   if FLastLine.Len > 0 then
   begin
-    if FLines <> nil then
-    begin
-      S := nil;
-      FLastLine.FlushToString(string(S));
-      FLines.Add(string(S));
-      string(S) := '';
-    end
-    else
+    if FLines = nil then
     begin
       FLastLine.FlushToStringBuffer(FStringBuffer);
       FStringBuffer.Append(JsonSerializationConfig.LineBreak);
-    end;
+    end
+    else
+    begin
+      S := nil;
+      try
+        FLastLine.FlushToString(string(S));
+        FLines.Add(string(S));
+      finally
+        string(S) := '';
+      end;
+    end
   end;
 end;
 
@@ -4508,15 +4516,17 @@ end;
 
 procedure TJsonOutputWriter.StreamFlushPossible;
 const
-  MaxBuffer = 64 * 1024;
+  MinFlushBufferLen = 1024 * 1024;
 begin
-  if (FStream <> nil) and (FStringBuffer.Len >= MaxBuffer) then
+  if (FStream <> nil) and (FStringBuffer.Len >= MinFlushBufferLen) then
     StreamFlush;
 end;
 
 procedure TJsonOutputWriter.ExpandIndents;
 begin
-  SetLength(FIndents, Length(FIndents) + 1);
+  Inc(FIndentsLen);
+  ReallocMem(Pointer(FIndents), FIndentsLen * SizeOf(string));
+  Pointer(FIndents[FIndent]) := nil;
   FIndents[FIndent] := FIndents[FIndent - 1] + JsonSerializationConfig.IndentChar;
 end;
 
@@ -4545,123 +4555,144 @@ begin
 end;
 
 procedure TJsonOutputWriter.Indent(const S: string);
+var
+  This: ^TJsonOutputWriter;
 begin
-  if FCompact then
+  This := @Self;
+  if This.FCompact then
   begin
-    FStringBuffer.Append(S);
-    StreamFlushPossible;
+    This.FStringBuffer.Append(S);
+    This.StreamFlushPossible; // inlined
   end
   else
   begin
-    AppendLine(ltIntro, S);
-    Inc(FIndent);
-    if FIndent >= Length(FIndents) then // this is a new indention level
+    This.AppendLine(ltIntro, S); // inlined
+    Inc(This.FIndent);
+    if This.FIndent >= This.FIndentsLen then // this is a new indention level
       ExpandIndents;
-    FLastType := ltIndent;
+    This.FLastType := ltIndent;
   end;
 end;
 
 procedure TJsonOutputWriter.Unindent(const S: string);
+var
+  This: ^TJsonOutputWriter;
 begin
-  if FCompact then
+  This := @Self;
+  if This.FCompact then
   begin
-    FStringBuffer.Append(S);
-    StreamFlushPossible;
+    This.FStringBuffer.Append(S);
+    This.StreamFlushPossible; // inlined
   end
   else
   begin
-    Dec(FIndent);
+    Dec(This.FIndent);
     //Assert(FIndent >= 0);
-    AppendLine(ltIndent, S);
-    FLastType := ltUnindent;
+    This.AppendLine(ltIndent, S); // inlined
+    This.FLastType := ltUnindent;
   end;
 end;
 
 procedure TJsonOutputWriter.AppendIntro(const S: string);
 const
   sQuoteCharColon = '":';
+var
+  This: ^TJsonOutputWriter;
 begin
-  if FCompact then
+  This := @Self;
+  if This.FCompact then
   begin
-    FStringBuffer.Append3(sQuoteChar, S, sQuoteCharColon);
-    StreamFlushPossible;
+    This.FStringBuffer.Append3(sQuoteChar, S, sQuoteCharColon);
+    This.StreamFlushPossible; // inlined
   end
   else
   begin
     FlushLastLine;
-    StreamFlushPossible;
-    FLastLine.Append(FIndents[FIndent]).Append3(sQuoteChar, S, '": ');
-    FLastType := ltIntro;
+    This.StreamFlushPossible; // inlined
+    This.FLastLine.Append(This.FIndents[This.FIndent]).Append3(sQuoteChar, S, '": ');
+    This.FLastType := ltIntro;
   end;
 end;
 
 procedure TJsonOutputWriter.AppendValue(P: PChar; Len: Integer);
+var
+  This: ^TJsonOutputWriter;
 begin
-  if FCompact then
+  This := @Self;
+  if This.FCompact then
   begin
-    FStringBuffer.Append(P, Len);
-    StreamFlushPossible;
+    This.FStringBuffer.Append(P, Len);
+    This.StreamFlushPossible; // inlined
   end
   else
   begin
-    AppendLine(ltIntro, P, Len);
-    FLastType := ltValue;
+    This.AppendLine(ltIntro, P, Len); // inlined
+    This.FLastType := ltValue;
   end;
 end;
 
 procedure TJsonOutputWriter.AppendValue(const S: string);
+var
+  This: ^TJsonOutputWriter;
 begin
-  if FCompact then
+  This := @Self;
+  if This.FCompact then
   begin
-    FStringBuffer.Append(S);
-    StreamFlushPossible;
+    This.FStringBuffer.Append(S);
+    This.StreamFlushPossible; // inlined
   end
   else
   begin
-    AppendLine(ltIntro, S);
-    FLastType := ltValue;
+    This.AppendLine(ltIntro, S); // inlined
+    This.FLastType := ltValue;
   end;
 end;
 
 procedure TJsonOutputWriter.AppendStrValue(const S: string);
+var
+  This: ^TJsonOutputWriter;
 begin
-  if FCompact then
+  This := @Self;
+  if This.FCompact then
   begin
-    FStringBuffer.Append3(sQuoteChar, S, sQuoteChar);
-    StreamFlushPossible;
+    This.FStringBuffer.Append3(sQuoteChar, S, sQuoteChar);
+    This.StreamFlushPossible; // inlined
   end
   else
   begin
-    if FLastType = ltIntro then
-      FLastLine.Append3(sQuoteChar, S, sQuoteChar)
+    if This.FLastType = ltIntro then
+      This.FLastLine.Append3(sQuoteChar, S, sQuoteChar)
     else
     begin
       FlushLastLine;
-      StreamFlushPossible;
-      FLastLine.Append(FIndents[FIndent]).Append3(sQuoteChar, S, sQuoteChar);
+      This.StreamFlushPossible; // inlined
+      This.FLastLine.Append(This.FIndents[This.FIndent]).Append3(sQuoteChar, S, sQuoteChar);
     end;
-    FLastType := ltValue;
+    This.FLastType := ltValue;
   end;
 end;
 
 procedure TJsonOutputWriter.AppendSeparator(const S: string);
+var
+  This: ^TJsonOutputWriter;
 begin
-  if FCompact then
+  This := @Self;
+  if This.FCompact then
   begin
-    FStringBuffer.Append(S);
-    StreamFlushPossible;
+    This.FStringBuffer.Append(S);
+    This.StreamFlushPossible; // inlined
   end
   else
   begin
-    if FLastType in [ltValue, ltUnindent] then
-      FLastLine.Append(S)
+    if This.FLastType in [ltValue, ltUnindent] then
+      This.FLastLine.Append(S)
     else
     begin
       FlushLastLine;
-      StreamFlushPossible;
-      FLastLine.Append2(FIndents[FIndent], PChar(Pointer(S)), Length(S));
+      This.StreamFlushPossible; // inlined
+      This.FLastLine.Append2(This.FIndents[This.FIndent], PChar(Pointer(S)), Length(S));
     end;
-    FLastType := ltSeparator;
+    This.FLastType := ltSeparator;
   end;
 end;
 
