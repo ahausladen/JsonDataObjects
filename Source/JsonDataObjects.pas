@@ -533,6 +533,23 @@ type
     property Capacity: Integer read FCapacity write SetCapacity;
   end;
 
+  TJsonNameValuePair = record
+    Name: string;
+    Value: TJsonDataValueHelper;
+  end;
+
+  TJsonObjectEnumerator = class(TObject)
+  protected
+    FIndex: Integer;
+    FObject: TJsonObject;
+  public
+    constructor Create(AObject: TJsonObject);
+
+    function GetCurrent: TJsonNameValuePair; inline;
+    function MoveNext: Boolean;
+    property Current: TJsonNameValuePair read GetCurrent;
+  end;
+
   // TJsonObject hold a JSON object and manages the JSON object properties
   TJsonObject = class {$IFDEF USE_FAST_NEWINSTANCE}sealed{$ENDIF}(TJsonBaseObject)
   private type
@@ -617,6 +634,8 @@ type
     function Extract(const Name: string): TJsonBaseObject;
     function ExtractArray(const Name: string): TJsonArray;
     function ExtractObject(const Name: string): TJsonObject;
+
+    function GetEnumerator: TJsonObjectEnumerator;
 
     property Types[const Name: string]: TJsonDataType read GetType;
     property Values[const Name: string]: TJsonDataValueHelper read GetValue write SetValue; default;
@@ -3339,6 +3358,29 @@ begin
   end;
 end;
 
+{ TJsonObjectEnumerator }
+
+constructor TJsonObjectEnumerator.Create(AObject: TJsonObject);
+begin
+  inherited Create;
+  FIndex := -1;
+  FObject := AObject;
+end;
+
+function TJsonObjectEnumerator.MoveNext: Boolean;
+begin
+  Result := FIndex < FObject.Count - 1;
+  if Result then
+    Inc(FIndex);
+end;
+
+function TJsonObjectEnumerator.GetCurrent: TJsonNameValuePair;
+begin
+  Result.Name := FObject.Names[FIndex];
+  Result.Value.FData.FIntern := FObject.Items[FIndex];
+  Result.Value.FData.FTyp := jdtNone;
+end;
+
 { TJsonObject }
 
 destructor TJsonObject.Destroy;
@@ -3459,6 +3501,11 @@ end;
 function TJsonObject.ExtractObject(const Name: string): TJsonObject;
 begin
   Result := Extract(Name) as TJsonObject;
+end;
+
+function TJsonObject.GetEnumerator: TJsonObjectEnumerator;
+begin
+  Result := TJsonObjectEnumerator.Create(Self);
 end;
 
 function TJsonObject.AddItem(const Name: string): PJsonDataValue;
