@@ -432,6 +432,18 @@ type
   PJsonDataValueArray = ^TJsonDataValueArray;
   TJsonDataValueArray = array[0..MaxInt div SizeOf(TJsonDataValue) - 1] of TJsonDataValue;
 
+  TJsonArrayEnumerator = class(TObject)
+  private
+    FIndex: Integer;
+    FArray: TJsonArray;
+  public
+    constructor Create(AArray: TJSonArray);
+
+    function GetCurrent: TJsonDataValueHelper; inline;
+    function MoveNext: Boolean;
+    property Current: TJsonDataValueHelper read GetCurrent;
+  end;
+
   // TJsonArray hold a JSON array and manages the array elements.
   TJsonArray = class {$IFDEF USE_FAST_NEWINSTANCE}sealed{$ENDIF}(TJsonBaseObject)
   private
@@ -501,6 +513,8 @@ type
     function InsertArray(Index: Integer): TJsonArray;
     function InsertObject(Index: Integer): TJsonObject; overload;
     procedure InsertObject(Index: Integer; const Value: TJsonObject); overload; inline; // makes it easier to insert "null"
+
+    function GetEnumerator: TJsonArrayEnumerator;
 
     property Types[Index: Integer]: TJsonDataType read GetType;
     property Values[Index: Integer]: TJsonDataValueHelper read GetValue write SetValue; default;
@@ -2776,6 +2790,27 @@ begin
         {$IFDEF HAS_RETURN_ADDRESS} at ReturnAddress{$ENDIF};
 end;
 
+{ TJsonArrayEnumerator }
+
+constructor TJsonArrayEnumerator.Create(AArray: TJSonArray);
+begin
+  inherited Create;
+  FIndex := -1;
+  FArray := AArray;
+end;
+
+function TJsonArrayEnumerator.GetCurrent: TJsonDataValueHelper;
+begin
+  Result := FArray[FIndex];
+end;
+
+function TJsonArrayEnumerator.MoveNext: Boolean;
+begin
+  Result := FIndex < FArray.Count - 1;
+  if Result then
+    Inc(FIndex);
+end;
+
 { TJsonArray }
 
 destructor TJsonArray.Destroy;
@@ -3142,6 +3177,11 @@ begin
     RaiseListError(Index);
   {$ENDIF CHECK_ARRAY_INDEX}
   Insert(Index, Value);
+end;
+
+function TJsonArray.GetEnumerator: TJsonArrayEnumerator;
+begin
+  Result := TJsonArrayEnumerator.Create(Self);
 end;
 
 procedure TJsonArray.SetString(Index: Integer; const Value: string);

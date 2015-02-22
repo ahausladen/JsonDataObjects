@@ -59,6 +59,7 @@ type
     procedure TestAdd;
     procedure TestInsert;
     procedure TestExtract;
+    procedure TestEnumerator;
   end;
 
   TestTJsonObject = class(TTestCase)
@@ -1476,6 +1477,52 @@ begin
     HelloA.Free;
   end;
 end;
+
+procedure TestTJsonArray.TestEnumerator;
+const
+  //TODO DRY: extract DataTypeNames from TJsonDataValue.TypeCastError
+  DataTypeNames: array[TJsonDataType] of string = (
+    'null', 'String', 'Integer', 'Long', 'Float', 'Bool', 'Array', 'Object'
+  );
+var
+  A: TJsonArray;
+  Value: TJsonDataValueHelper;
+  Typ: TJsonDataType;
+  FoundTypes: array[TJsonDataType] of Boolean;
+begin
+  A := TJsonArray.Create;
+  try
+    for Typ in [Low(TJsonDataType)..High(TJsonDataType)] do
+      FoundTypes[Typ] := False;
+
+    A.FromJSON('[ 42, { "Key": "Value" }, true, null, 1234567890123456789, 1.12, "String", [ 1, 2, 3 ] ]');
+
+    for Value in A do
+    begin
+      Typ := Value.Typ;
+      if (Value.Typ = jdtObject) and (Value.ObjectValue = nil) then
+        Typ := jdtNone;
+
+      FoundTypes[Typ] := True;
+
+      case Typ of
+        jdtString:  CheckEquals('String', Value, 'String value');
+        jdtInt:     CheckEquals(42, Value, 'Int value');
+        jdtLong:    CheckEquals(1234567890123456789, Value, 'Long value');
+        jdtFloat:   CheckEquals(1.12, Value, 0.001, 'Float value');
+        jdtBool:    CheckEquals(True, Value, 'Boolean value');
+        jdtArray:   CheckEquals(3, Value.Count, 'Array count');
+        jdtObject:  CheckEquals('Value', Value.S['Key'], 'Object value');
+      end;
+    end;
+
+    for Typ in [Low(TJsonDataType)..High(TJsonDataType)] do
+      CheckTrue(FoundTypes[Typ], DataTypeNames[Typ]);
+  finally
+    A.Free;
+  end;
+end;
+
 
 { TestTJsonObject }
 
