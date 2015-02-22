@@ -432,6 +432,18 @@ type
   PJsonDataValueArray = ^TJsonDataValueArray;
   TJsonDataValueArray = array[0..MaxInt div SizeOf(TJsonDataValue) - 1] of TJsonDataValue;
 
+  TJsonArrayEnumerator = class(TObject)
+  private
+    FIndex: Integer;
+    FArray: TJsonArray;
+  public
+    constructor Create(AArray: TJSonArray);
+
+    function GetCurrent: TJsonDataValueHelper; inline;
+    function MoveNext: Boolean;
+    property Current: TJsonDataValueHelper read GetCurrent;
+  end;
+
   // TJsonArray hold a JSON array and manages the array elements.
   TJsonArray = class {$IFDEF USE_FAST_NEWINSTANCE}sealed{$ENDIF}(TJsonBaseObject)
   private
@@ -502,6 +514,8 @@ type
     function InsertObject(Index: Integer): TJsonObject; overload;
     procedure InsertObject(Index: Integer; const Value: TJsonObject); overload; inline; // makes it easier to insert "null"
 
+    function GetEnumerator: TJsonArrayEnumerator;
+
     property Types[Index: Integer]: TJsonDataType read GetType;
     property Values[Index: Integer]: TJsonDataValueHelper read GetValue write SetValue; default;
 
@@ -517,6 +531,23 @@ type
     property Items[Index: Integer]: PJsonDataValue read GetItem;
     property Count: Integer read FCount write SetCount;
     property Capacity: Integer read FCapacity write SetCapacity;
+  end;
+
+  TJsonNameValuePair = record
+    Name: string;
+    Value: TJsonDataValueHelper;
+  end;
+
+  TJsonObjectEnumerator = class(TObject)
+  protected
+    FIndex: Integer;
+    FObject: TJsonObject;
+  public
+    constructor Create(AObject: TJsonObject);
+
+    function GetCurrent: TJsonNameValuePair; inline;
+    function MoveNext: Boolean;
+    property Current: TJsonNameValuePair read GetCurrent;
   end;
 
   // TJsonObject hold a JSON object and manages the JSON object properties
@@ -603,6 +634,8 @@ type
     function Extract(const Name: string): TJsonBaseObject;
     function ExtractArray(const Name: string): TJsonArray;
     function ExtractObject(const Name: string): TJsonObject;
+
+    function GetEnumerator: TJsonObjectEnumerator;
 
     property Types[const Name: string]: TJsonDataType read GetType;
     property Values[const Name: string]: TJsonDataValueHelper read GetValue write SetValue; default;
@@ -1947,12 +1980,12 @@ begin
     jdtInt:
       begin
         P := IntToText(FValue.I, @PChar(@Buffer[0])[Length(Buffer)]);
-        Writer.AppendValue(P, @PChar(@Buffer[0])[Length(Buffer)] - P);
+        Writer.AppendValue(P, PChar(@PChar(@Buffer[0])[Length(Buffer)]) - P); // extra typecast to work around a compiler bug (fixed in XE3)
       end;
     jdtLong:
       begin
         P := Int64ToText(FValue.L, @PChar(@Buffer[0])[Length(Buffer)]);
-        Writer.AppendValue(P, @PChar(@Buffer[0])[Length(Buffer)] - P);
+        Writer.AppendValue(P, PChar(@PChar(@Buffer[0])[Length(Buffer)]) - P); // extra typecast to work around a compiler bug (fixed in XE3)
       end;
     jdtFloat:
       Writer.AppendValue(Buffer, DoubleToText(Buffer, FValue.F));
@@ -2776,6 +2809,27 @@ begin
         {$IFDEF HAS_RETURN_ADDRESS} at ReturnAddress{$ENDIF};
 end;
 
+{ TJsonArrayEnumerator }
+
+constructor TJsonArrayEnumerator.Create(AArray: TJSonArray);
+begin
+  inherited Create;
+  FIndex := -1;
+  FArray := AArray;
+end;
+
+function TJsonArrayEnumerator.GetCurrent: TJsonDataValueHelper;
+begin
+  Result := FArray[FIndex];
+end;
+
+function TJsonArrayEnumerator.MoveNext: Boolean;
+begin
+  Result := FIndex < FArray.Count - 1;
+  if Result then
+    Inc(FIndex);
+end;
+
 { TJsonArray }
 
 destructor TJsonArray.Destroy;
@@ -3144,6 +3198,11 @@ begin
   Insert(Index, Value);
 end;
 
+function TJsonArray.GetEnumerator: TJsonArrayEnumerator;
+begin
+  Result := TJsonArrayEnumerator.Create(Self);
+end;
+
 procedure TJsonArray.SetString(Index: Integer; const Value: string);
 begin
   {$IFDEF CHECK_ARRAY_INDEX}
@@ -3299,6 +3358,29 @@ begin
   end;
 end;
 
+{ TJsonObjectEnumerator }
+
+constructor TJsonObjectEnumerator.Create(AObject: TJsonObject);
+begin
+  inherited Create;
+  FIndex := -1;
+  FObject := AObject;
+end;
+
+function TJsonObjectEnumerator.MoveNext: Boolean;
+begin
+  Result := FIndex < FObject.Count - 1;
+  if Result then
+    Inc(FIndex);
+end;
+
+function TJsonObjectEnumerator.GetCurrent: TJsonNameValuePair;
+begin
+  Result.Name := FObject.Names[FIndex];
+  Result.Value.FData.FIntern := FObject.Items[FIndex];
+  Result.Value.FData.FTyp := jdtNone;
+end;
+
 { TJsonObject }
 
 destructor TJsonObject.Destroy;
@@ -3419,6 +3501,11 @@ end;
 function TJsonObject.ExtractObject(const Name: string): TJsonObject;
 begin
   Result := Extract(Name) as TJsonObject;
+end;
+
+function TJsonObject.GetEnumerator: TJsonObjectEnumerator;
+begin
+  Result := TJsonObjectEnumerator.Create(Self);
 end;
 
 function TJsonObject.AddItem(const Name: string): PJsonDataValue;
