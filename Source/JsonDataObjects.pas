@@ -1980,12 +1980,12 @@ begin
     jdtInt:
       begin
         P := IntToText(FValue.I, @PChar(@Buffer[0])[Length(Buffer)]);
-        Writer.AppendValue(P, (@PChar(@Buffer[0])[Length(Buffer)] - P) div SizeOf(Char));
+        Writer.AppendValue(P, PChar(@PChar(@Buffer[0])[Length(Buffer)]) - P); // extra typecast to work around a compiler bug (fixed in XE3)
       end;
     jdtLong:
       begin
         P := Int64ToText(FValue.L, @PChar(@Buffer[0])[Length(Buffer)]);
-        Writer.AppendValue(P, (@PChar(@Buffer[0])[Length(Buffer)] - P) div SizeOf(Char));
+        Writer.AppendValue(P, PChar(@PChar(@Buffer[0])[Length(Buffer)]) - P); // extra typecast to work around a compiler bug (fixed in XE3)
       end;
     jdtFloat:
       Writer.AppendValue(Buffer, DoubleToText(Buffer, FValue.F));
