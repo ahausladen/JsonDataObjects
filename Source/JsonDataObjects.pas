@@ -147,9 +147,11 @@ type
 
       function Append(const S: string): PJsonStringBuilder; overload;
       procedure Append(P: PChar; Len: Integer); overload;
-      procedure Append2(const S1: string; S2: PChar; S2Len: Integer);
+      function Append2(const S1: string; S2: PChar; S2Len: Integer): PJsonStringBuilder; overload;
+      procedure Append2(Ch1: Char; Ch2: Char); overload;
       procedure Append3(Ch1: Char; const S2, S3: string); overload;
-      procedure Append3(Ch1: Char; const S2: string; Ch3: Char); overload;
+      procedure Append3(Ch1: Char; const S2: string; Ch3: Char); overload; inline;
+      procedure Append3(Ch1: Char; const P2: PChar; P2Len: Integer; Ch3: Char); overload;
 
       property Len: Integer read FLen;
       property Data: PChar read FData;
@@ -184,10 +186,11 @@ type
 
     procedure Indent(const S: string);
     procedure Unindent(const S: string);
-    procedure AppendIntro(const S: string);
+    procedure AppendIntro(P: PChar; Len: Integer); overload;
     procedure AppendValue(const S: string); overload;
     procedure AppendValue(P: PChar; Len: Integer); overload;
-    procedure AppendStrValue(const S: string);
+    procedure AppendStrValue(const S: string); overload;
+    procedure AppendStrValue(P: PChar; Len: Integer); overload;
     procedure AppendSeparator(const S: string);
   end;
 
@@ -360,7 +363,7 @@ type
   // TJsonBaseObject is the base class for TJsonArray and TJsonObject
   TJsonBaseObject = class abstract(TObject)
   private type
-    TWriterAppendMethod = procedure(const S: string) of object;
+    TWriterAppendMethod = procedure(P: PChar; Len: Integer) of object;
     TStreamInfo = record
       Buffer: PByte;
       Size: NativeInt;
@@ -787,24 +790,6 @@ type
     procedure Intern(var S: string; var PropName: string);
   end;
   {$ENDIF USE_STRINGINTERN_FOR_NAMES}
-
-  TStackStringBuffer = record
-  private
-    const MaxBuf = 256 - 1;
-  private
-    FBufPos: PChar;
-    FLen: Integer;
-    FDestStr: PString;
-    FBuf: array[0..MaxBuf] of Char;
-  public
-    procedure Init(ADestStr: PString);
-    procedure Done;
-
-    procedure AppendStr(Value: PChar; Len: Integer);
-    procedure AppendChar(Value: Char); inline;
-    procedure Append2Char(Value1, Value2: Char); inline;
-    //function IsEmpty: Boolean; inline;
-  end;
 
   TJsonToken = record
     Kind: TJsonTokenKind;
@@ -2052,21 +2037,20 @@ begin
 
     // nothing found, than it is easy
     if P = EndP then
-      AppendMethod(S)
+      AppendMethod(PChar(S), Length(S))
     else
       EscapeStrToJSONStr(F, P, EndP, AppendMethod);
   end
   else
-    AppendMethod('');
+    AppendMethod(nil, 0);
 end;
 
 class procedure TJsonBaseObject.EscapeStrToJSONStr(F, P, EndP: PChar; const AppendMethod: TWriterAppendMethod);
 const
   HexChars: array[0..15] of Char = '0123456789abcdef';
 var
-  Buf: TStackStringBuffer;
+  Buf: TJsonOutputWriter.TJsonStringBuilder;
   Ch: Char;
-  RetValue: string;
   {$IFDEF ESCAPE_SLASH_AFTER_LESSTHAN}
   StartP: PChar;
   {$ENDIF ESCAPE_SLASH_AFTER_LESSTHAN}
@@ -2075,47 +2059,49 @@ begin
   StartP := F;
   {$ENDIF ESCAPE_SLASH_AFTER_LESSTHAN}
 
-  //RetValue := '';
-  Buf.Init(@RetValue);
-  repeat
-    if P <> F then
-      Buf.AppendStr(F, P - F); // append the string part that doesn't need an escape sequence
-    if P < EndP then
-    begin
-      Ch := P^;
-      case Ch of
-        #0..#7, #11, #14..#31:
-          begin
-            Buf.AppendStr('\u00', 4);
-            Buf.Append2Char(HexChars[Word(Ch) shr 4], HexChars[Word(Ch) and $F]);
-          end;
-        #8: Buf.Append2Char('\', 'b');
-        #9: Buf.Append2Char('\', 't');
-        #10: Buf.Append2Char('\', 'n');
-        #12: Buf.Append2Char('\', 'f');
-        #13: Buf.Append2Char('\', 'r');
-        '\': Buf.Append2Char('\', '\');
-        '"': Buf.Append2Char('\', '"');
-        {$IFDEF ESCAPE_SLASH_AFTER_LESSTHAN}
-        '/':
-          begin
-            if (P > StartP) and (P[-1] = '<') then // escape '/' only if we have '</' to support HTML <script>-Tag
-              Buf.Append2Char('\', '/')
-            else
-              Buf.AppendChar('/');
-          end;
-        {$ENDIF ESCAPE_SLASH_AFTER_LESSTHAN}
-      end;
-      Inc(P);
-      F := P;
-      while (P < EndP) and not (P^ in [#0..#31, '\', '"' {$IFDEF ESCAPE_SLASH_AFTER_LESSTHAN}, '/'{$ENDIF}]) do
+  Buf.Init;
+  try
+    repeat
+      if P <> F then
+        Buf.Append(F, P - F); // append the string part that doesn't need an escape sequence
+      if P < EndP then
+      begin
+        Ch := P^;
+        case Ch of
+          #0..#7, #11, #14..#31:
+            begin
+              Buf.Append('\u00', 4);
+              Buf.Append2(HexChars[Word(Ch) shr 4], HexChars[Word(Ch) and $F]);
+            end;
+          #8: Buf.Append('\b', 2);
+          #9: Buf.Append('\t', 2);
+          #10: Buf.Append('\n', 2);
+          #12: Buf.Append('\f', 2);
+          #13: Buf.Append('\r', 2);
+          '\': Buf.Append('\\', 2);
+          '"': Buf.Append('\"', 2);
+          {$IFDEF ESCAPE_SLASH_AFTER_LESSTHAN}
+          '/':
+            begin
+              if (P > StartP) and (P[-1] = '<') then // escape '/' only if we have '</' to support HTML <script>-Tag
+                Buf.Append('\/', 2)
+              else
+                Buf.Append('/', 1);
+            end;
+          {$ENDIF ESCAPE_SLASH_AFTER_LESSTHAN}
+        end;
         Inc(P);
-    end
-    else
-      Break;
-  until False;
-  Buf.Done; // transfers the buffer to "Result"
-  AppendMethod(RetValue);
+        F := P;
+        while (P < EndP) and not (P^ in [#0..#31, '\', '"' {$IFDEF ESCAPE_SLASH_AFTER_LESSTHAN}, '/'{$ENDIF}]) do
+          Inc(P);
+      end
+      else
+        Break;
+    until False;
+    AppendMethod(Buf.Data, Buf.Len);
+  finally
+    Buf.Done;
+  end;
 end;
 
 class procedure TJsonBaseObject.JSONStrToStr(P, EndP: PChar; FirstEscapeIndex: Integer; var S: string);
@@ -4680,7 +4666,7 @@ begin
   end;
 end;
 
-procedure TJsonOutputWriter.AppendIntro(const S: string);
+procedure TJsonOutputWriter.AppendIntro(P: PChar; Len: Integer);
 const
   sQuoteCharColon = '":';
 var
@@ -4689,14 +4675,14 @@ begin
   This := @Self;
   if This.FCompact then
   begin
-    This.FStringBuffer.Append3(sQuoteChar, S, sQuoteCharColon);
+    This.FStringBuffer.Append2(sQuoteChar, P, Len).Append(sQuoteCharColon, 2);
     This.StreamFlushPossible; // inlined
   end
   else
   begin
     FlushLastLine;
     This.StreamFlushPossible; // inlined
-    This.FLastLine.Append(This.FIndents[This.FIndent]).Append3(sQuoteChar, S, '": ');
+    This.FLastLine.Append(This.FIndents[This.FIndent]).Append2(sQuoteChar, P, Len).Append('": ', 3);
     This.FLastType := ltIntro;
   end;
 end;
@@ -4754,6 +4740,30 @@ begin
       FlushLastLine;
       This.StreamFlushPossible; // inlined
       This.FLastLine.Append(This.FIndents[This.FIndent]).Append3(sQuoteChar, S, sQuoteChar);
+    end;
+    This.FLastType := ltValue;
+  end;
+end;
+
+procedure TJsonOutputWriter.AppendStrValue(P: PChar; Len: Integer);
+var
+  This: ^TJsonOutputWriter;
+begin
+  This := @Self;
+  if This.FCompact then
+  begin
+    This.FStringBuffer.Append3(sQuoteChar, P, Len, sQuoteChar);
+    This.StreamFlushPossible; // inlined
+  end
+  else
+  begin
+    if This.FLastType = ltIntro then
+      This.FLastLine.Append3(sQuoteChar, P, Len, sQuoteChar)
+    else
+    begin
+      FlushLastLine;
+      This.StreamFlushPossible; // inlined
+      This.FLastLine.Append(This.FIndents[This.FIndent]).Append3(sQuoteChar, P, Len, sQuoteChar);
     end;
     This.FLastType := ltValue;
   end;
@@ -5717,92 +5727,6 @@ begin
   FText := P;
 end;
 
-{ TStackStringBuffer }
-
-procedure TStackStringBuffer.Init(ADestStr: PString);
-begin
-  FBufPos := @FBuf[0];
-  FLen := Length(ADestStr^);
-  FDestStr := ADestStr;
-end;
-
-procedure TStackStringBuffer.Done;
-var
-  L: Integer;
-begin
-  if FBufPos > @FBuf[0] then
-  begin
-    L := (FBufPos - @FBuf[0]);
-    SetLength(FDestStr^, FLen + L);
-    Move(FBuf[0], PChar(Pointer(FDestStr^))[FLen], L * SizeOf(Char));
-    Inc(FLen, L);
-    FBufPos := @FBuf[0];
-  end;
-end;
-
-procedure TStackStringBuffer.AppendStr(Value: PChar; Len: Integer);
-var
-  L: Integer;
-begin
-  if Value <> '' then
-  begin
-    L := Len;
-    if L = 1 then
-      AppendChar(Value[0])
-    else if L = 2 then
-      Append2Char(Value[0], Value[1])
-    else
-    begin
-      if FBufPos + L >= @FBuf[MaxBuf] then
-        Done;
-
-      if L >= Length(FBuf) div 2 then // large string => append it directly to FDestStr
-      begin
-        Done;
-        SetLength(FDestStr^, FLen + L);
-        Move(Value[0], PChar(Pointer(FDestStr^))[FLen], L * SizeOf(Char));
-        Inc(FLen, L);
-      end
-      else
-      begin
-        Move(Value[0], FBufPos^, L * SizeOf(Char));
-        Inc(FBufPos, L);
-      end;
-    end;
-  end;
-end;
-
-procedure TStackStringBuffer.AppendChar(Value: Char);
-var
-  P: PChar;
-begin
-  P := FBufPos;
-  if P = @FBuf[MaxBuf] then
-    Done;
-  P^ := Value;
-  Inc(P);
-  FBufPos := P;
-end;
-
-procedure TStackStringBuffer.Append2Char(Value1, Value2: Char);
-var
-  P: PChar;
-begin
-  P := FBufPos;
-  if P + 1 >= @FBuf[MaxBuf] then
-    Done;
-  P^ := Value1;
-  Inc(P);
-  P^ := Value2;
-  Inc(P);
-  FBufPos := P;
-end;
-
-{function TStackStringBuffer.IsEmpty: Boolean;
-begin
-  Result := (FBufPos = @FBuf[0]) and (FLen = 0);
-end;}
-
 { TJsonDataValueHelper }
 
 class operator TJsonDataValueHelper.Implicit(const Value: string): TJsonDataValueHelper;
@@ -6480,7 +6404,7 @@ begin
   end;
 end;
 
-procedure TJsonOutputWriter.TJsonStringBuilder.Append2(const S1: string; S2: PChar; S2Len: Integer);
+function TJsonOutputWriter.TJsonStringBuilder.Append2(const S1: string; S2: PChar; S2Len: Integer): PJsonStringBuilder;
 var
   L, S1Len, LLen: Integer;
 begin
@@ -6507,7 +6431,21 @@ begin
     Move(S2[0], FData[LLen], S2Len * SizeOf(Char));
   end;
   FLen := LLen + S2Len;
+  Result := @Self;
 end;
+
+procedure TJsonOutputWriter.TJsonStringBuilder.Append2(Ch1: Char; Ch2: Char);
+var
+  LLen: Integer;
+begin
+  LLen := FLen;
+  if LLen + 2 >= FCapacity then
+    Grow(2);
+  FData[LLen] := Ch1;
+  FData[LLen + 1] := Ch2;
+  FLen := LLen + 2;
+end;
+
 
 procedure TJsonOutputWriter.TJsonStringBuilder.Append3(Ch1: Char; const S2, S3: string);
 var
@@ -6541,30 +6479,34 @@ begin
   FLen := LLen + S3Len;
 end;
 
-procedure TJsonOutputWriter.TJsonStringBuilder.Append3(Ch1: Char; const S2: string; Ch3: Char);
+procedure TJsonOutputWriter.TJsonStringBuilder.Append3(Ch1: Char; const P2: PChar; P2Len: Integer; Ch3: Char);
 var
-  L, S2Len, LLen: Integer;
+  L, LLen: Integer;
 begin
   LLen := FLen;
-  S2Len := Length(S2);
-  L := 2 + S2Len;
+  L := 2 + P2Len;
   if LLen + L >= FCapacity then
     Grow(LLen + L);
 
   FData[LLen] := Ch1;
   Inc(LLen);
 
-  case S2Len of
+  case P2Len of
     0: ;
-    1: FData[LLen] := PChar(Pointer(S2))^;
-    2: PLongWord(@FData[LLen])^ := PLongWord(Pointer(S2))^;
+    1: FData[LLen] := P2^;
+    2: PLongWord(@FData[LLen])^ := PLongWord(P2)^;
   else
-    Move(PChar(Pointer(S2))[0], FData[LLen], S2Len * SizeOf(Char));
+    Move(P2[0], FData[LLen], P2Len * SizeOf(Char));
   end;
-  Inc(LLen, S2Len);
+  Inc(LLen, P2Len);
 
   FData[LLen] := Ch1;
   FLen := LLen + 1;
+end;
+
+procedure TJsonOutputWriter.TJsonStringBuilder.Append3(Ch1: Char; const S2: string; Ch3: Char);
+begin
+  Append3(Ch1, PChar(Pointer(S2)), Length(S2), Ch3);
 end;
 
 procedure TJsonOutputWriter.TJsonStringBuilder.FlushToStringBuffer(var Buffer: TJsonStringBuilder);
