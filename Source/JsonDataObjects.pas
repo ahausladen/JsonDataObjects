@@ -192,6 +192,7 @@ type
     procedure AppendStrValue(const S: string); overload;
     procedure AppendStrValue(P: PChar; Len: Integer); overload;
     procedure AppendSeparator(const S: string);
+    procedure FreeIndents;
   end;
 
   TJsonDataType = (
@@ -4505,12 +4506,21 @@ begin
   end;
 end;
 
+procedure TJsonOutputWriter.FreeIndents;
+var
+  I: Integer;
+begin
+  for I := 0 to FIndentsLen - 1 do
+    FIndents[I] := '';
+  FreeMem(FIndents);
+end;
+
 function TJsonOutputWriter.Done: string;
 begin
   if not FCompact then
   begin
     FlushLastLine;
-    FreeMem(FIndents);
+    FreeIndents;
     FLastLine.Done;
   end;
 
@@ -4520,7 +4530,7 @@ end;
 
 procedure TJsonOutputWriter.LinesDone;
 begin
-  FreeMem(FIndents);
+  FreeIndents;
   FlushLastLine;
   FLastLine.Done;
 end;
@@ -4530,7 +4540,7 @@ begin
   if not FCompact then
   begin
     FlushLastLine;
-    FreeMem(FIndents);
+    FreeIndents;
     FLastLine.Done;
   end;
 
