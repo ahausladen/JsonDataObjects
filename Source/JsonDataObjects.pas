@@ -1412,7 +1412,7 @@ begin
     jtkInt:
       begin
         // find the best match
-        if FLook.HI = 0 then
+        if (FLook.HI = 0) and (FLook.I >= 0) then
           Data.InternAdd(FPropName, FLook.I)
         else
           Data.InternAdd(FPropName, FLook.L);
@@ -1490,7 +1490,7 @@ begin
     jtkInt:
       begin
         // find the best match
-        if FLook.HI = 0 then
+        if (FLook.HI = 0) and (FLook.I >= 0) then
           Data.Add(FLook.I)
         else
           Data.Add(FLook.L);
@@ -5103,7 +5103,7 @@ begin
       // just an integer
       if Neg then
       begin
-        if FLook.HI = 0 then // 32bit Integer
+        if (FLook.HI = 0) and (FLook.I >= 0) then // 32bit Integer
           FLook.I := -FLook.I
         else                 // 64bit Integer
           FLook.L := -FLook.L;
@@ -5567,7 +5567,7 @@ begin
       // just an integer
       if Neg then
       begin
-        if FLook.HI = 0 then // 32bit Integer
+        if (FLook.HI = 0) and (FLook.I >= 0) then // 32bit Integer
           FLook.I := -FLook.I
         else                 // 64bit Integer
           FLook.L := -FLook.L;

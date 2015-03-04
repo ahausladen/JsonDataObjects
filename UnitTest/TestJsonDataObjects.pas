@@ -46,6 +46,7 @@ type
     procedure TestDateTimeToJSON;
     procedure TestEmptyString;
     procedure TestToUTF8JSON;
+    procedure TestInt64MaxIntX2;
   end;
 
   TestTJsonArray = class(TTestCase)
@@ -1279,6 +1280,23 @@ begin
     CheckEqualsMem(@ExpectedBytes[0], @Bytes[0], Length(Bytes));
   finally
     B.Free;
+  end;
+end;
+
+procedure TestTJsonBaseObject.TestInt64MaxIntX2;
+var
+  lInput: String;
+  lInt64: Int64;
+  lJsonObject: TJsonObject;
+begin
+  lInt64 := 2 * Int64(MaxInt); // 4294967294
+  lInput := Format('{ "num": %d }', [lInt64]);
+
+  lJsonObject := TJsonObject.Parse(lInput) as TJsonObject;
+  try
+    CheckEquals(lInt64, lJsonObject.L['num']);
+  finally
+    lJsonObject.Free;
   end;
 end;
 
