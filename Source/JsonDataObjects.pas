@@ -189,8 +189,7 @@ type
     procedure AppendIntro(P: PChar; Len: Integer); overload;
     procedure AppendValue(const S: string); overload;
     procedure AppendValue(P: PChar; Len: Integer); overload;
-    procedure AppendStrValue(const S: string); overload;
-    procedure AppendStrValue(P: PChar; Len: Integer); overload;
+    procedure AppendStrValue(P: PChar; Len: Integer);
     procedure AppendSeparator(const S: string);
     procedure FreeIndents;
   end;
@@ -4727,30 +4726,6 @@ begin
   else
   begin
     This.AppendLine(ltIntro, S); // inlined
-    This.FLastType := ltValue;
-  end;
-end;
-
-procedure TJsonOutputWriter.AppendStrValue(const S: string);
-var
-  This: ^TJsonOutputWriter;
-begin
-  This := @Self;
-  if This.FCompact then
-  begin
-    This.FStringBuffer.Append3(sQuoteChar, S, sQuoteChar);
-    This.StreamFlushPossible; // inlined
-  end
-  else
-  begin
-    if This.FLastType = ltIntro then
-      This.FLastLine.Append3(sQuoteChar, S, sQuoteChar)
-    else
-    begin
-      FlushLastLine;
-      This.StreamFlushPossible; // inlined
-      This.FLastLine.Append(This.FIndents[This.FIndent]).Append3(sQuoteChar, S, sQuoteChar);
-    end;
     This.FLastType := ltValue;
   end;
 end;
