@@ -4286,9 +4286,8 @@ end;
 procedure TStringIntern.Init;
 begin
   FCount := 0;
-  FCapacity := 16;
-  GetMem(FStrings, FCapacity * SizeOf(FStrings[0]));
   FCapacity := 17;
+  GetMem(FStrings, FCapacity * SizeOf(FStrings[0]));
   GetMem(FBuckets, FCapacity * SizeOf(FBuckets[0]));
   FillChar(FBuckets[0], FCapacity * SizeOf(FBuckets[0]), $FF);
 end;
