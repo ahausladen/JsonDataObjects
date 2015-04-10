@@ -716,7 +716,7 @@ type
     jtkEof, jtkInvalidSymbol,
     jtkLBrace, jtkRBrace, jtkLBracket, jtkRBracket, jtkComma, jtkColon,
     jtkIdent,
-    jtkValue, jtkString, jtkInt, jtkFloat, jtkTrue, jtkFalse, jtkNull
+    jtkValue, jtkString, jtkInt, jtkLong, jtkFloat, jtkTrue, jtkFalse, jtkNull
   );
 
 const
@@ -724,7 +724,7 @@ const
     'end of file', 'invalid symbol',
     '"{"', '"}"', '"["', '"]"', '","', '":"',
     'identifier',
-    'value', 'value', 'value', 'value', 'value', 'value', 'value'
+    'value', 'value', 'value', 'value', 'value', 'value', 'value', 'value'
   );
 
   Power10: array[0..18] of Double = (
@@ -1410,11 +1410,13 @@ begin
 
     jtkInt:
       begin
-        // find the best match
-        if (FLook.HI = 0) and (FLook.I >= 0) then
-          Data.InternAdd(FPropName, FLook.I)
-        else
-          Data.InternAdd(FPropName, FLook.L);
+        Data.InternAdd(FPropName, FLook.I);
+        Next;
+      end;
+
+    jtkLong:
+      begin
+        Data.InternAdd(FPropName, FLook.L);
         Next;
       end;
 
@@ -1488,11 +1490,13 @@ begin
 
     jtkInt:
       begin
-        // find the best match
-        if (FLook.HI = 0) and (FLook.I >= 0) then
-          Data.Add(FLook.I)
-        else
-          Data.Add(FLook.L);
+        Data.Add(FLook.I);
+        Next;
+      end;
+
+    jtkLong:
+      begin
+        Data.Add(FLook.L);
         Next;
       end;
 
@@ -5071,14 +5075,17 @@ begin
   else if P - F <= 19 then // Int64 fits 19 digits
   begin
     FLook.L := ParseInt64Utf8(F, P);
-    FLook.Kind := jtkInt; // the lexer doesn't know jtkLong
+    FLook.Kind := jtkLong;
     if not (P^ in [Ord('.'), Ord('E'), Ord('e')]) then
     begin
       // just an integer
       if Neg then
       begin
         if (FLook.HI = 0) and (FLook.I >= 0) then // 32bit Integer
-          FLook.I := -FLook.I
+        begin
+          FLook.I := -FLook.I;
+          FLook.Kind := jtkInt;
+        end
         else                 // 64bit Integer
           FLook.L := -FLook.L;
       end;
@@ -5535,14 +5542,17 @@ begin
   else if P - F <= 19 then // Int64 fits 19 digits
   begin
     FLook.L := ParseInt64(F, P);
-    FLook.Kind := jtkInt; // the lexer doesn't know jtkLong
+    FLook.Kind := jtkLong;
     if not (P^ in ['.', 'E', 'e']) then
     begin
       // just an integer
       if Neg then
       begin
         if (FLook.HI = 0) and (FLook.I >= 0) then // 32bit Integer
-          FLook.I := -FLook.I
+        begin
+          FLook.I := -FLook.I;
+          FLook.Kind := jtkInt;
+        end
         else                 // 64bit Integer
           FLook.L := -FLook.L;
       end;

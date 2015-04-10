@@ -1285,18 +1285,27 @@ end;
 
 procedure TestTJsonBaseObject.TestInt64MaxIntX2;
 var
-  lInput: String;
-  lInt64: Int64;
-  lJsonObject: TJsonObject;
+  S: String;
+  Value: Int64;
+  JsonObject: TJsonObject;
 begin
-  lInt64 := 2 * Int64(MaxInt); // 4294967294
-  lInput := Format('{ "num": %d }', [lInt64]);
+  Value := 2 * Int64(MaxInt); // 4294967294
+  S := Format('{ "num": %d }', [Value]);
 
-  lJsonObject := TJsonObject.Parse(lInput) as TJsonObject;
+  JsonObject := TJsonObject.Parse(S) as TJsonObject;
   try
-    CheckEquals(lInt64, lJsonObject.L['num']);
+    CheckEquals(Value, JsonObject.L['num']);
   finally
-    lJsonObject.Free;
+    JsonObject.Free;
+  end;
+
+  S := '{"no":-1}';
+  JsonObject := TJsonObject.Parse(S) as TJSONObject;
+  try
+    Value := JsonObject.L['no']; // <===== error : n is not -1
+    CheckEquals(-1, Value);
+  finally
+    JsonObject.Free;
   end;
 end;
 
