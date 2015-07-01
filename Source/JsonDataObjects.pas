@@ -508,6 +508,7 @@ type
     procedure Add(AValue: Boolean); overload;
     procedure Add(const AValue: TJsonArray); overload;
     procedure Add(const AValue: TJsonObject); overload;
+    procedure Add(const AValue: Variant); overload;
     function AddArray: TJsonArray;
     function AddObject: TJsonObject; overload;
     procedure AddObject(const Value: TJsonObject); overload; inline; // makes it easier to add "null"
@@ -3132,6 +3133,14 @@ var
 begin
   Data := AddItem;
   Data.Value := AValue;
+end;
+
+procedure TJsonArray.Add(const AValue: Variant);
+var
+  Data: PJsonDataValue;
+begin
+  Data := AddItem;
+  Data.VariantValue := AValue;
 end;
 
 function TJsonArray.AddArray: TJsonArray;
