@@ -225,6 +225,7 @@ type
     function GetBoolValue: Boolean;
     function GetArrayValue: TJsonArray;
     function GetObjectValue: TJsonObject;
+    function GetVariantValue: Variant;
 
     procedure SetValue(const AValue: string);
     procedure SetIntValue(const AValue: Integer);
@@ -233,6 +234,7 @@ type
     procedure SetBoolValue(const AValue: Boolean);
     procedure SetArrayValue(const AValue: TJsonArray);
     procedure SetObjectValue(const AValue: TJsonObject);
+    procedure SetVariantValue(const AValue: Variant);
 
     procedure InternToJSON(var Writer: TJsonOutputWriter);
     procedure InternSetValue(const AValue: string); // skips the call to Clear()
@@ -250,6 +252,7 @@ type
     property BoolValue: Boolean read GetBoolValue write SetBoolValue;
     property ArrayValue: TJsonArray read GetArrayValue write SetArrayValue;
     property ObjectValue: TJsonObject read GetObjectValue write SetObjectValue;
+    property VariantValue: variant read GetVariantValue write SetVariantValue;
   end;
 
   // TJsonDataValueHelper is used to implement the "easy access" functionality. It is
@@ -263,6 +266,7 @@ type
     function GetBoolValue: Boolean; inline;
     function GetArrayValue: TJsonArray; inline;
     function GetObjectValue: TJsonObject; inline;
+    function GetVariantValue: Variant; inline;
 
     procedure SetValue(const Value: string);
     procedure SetIntValue(const Value: Integer);
@@ -271,6 +275,7 @@ type
     procedure SetBoolValue(const Value: Boolean);
     procedure SetArrayValue(const Value: TJsonArray);
     procedure SetObjectValue(const Value: TJsonObject);
+    procedure SetVariantValue(const Value: Variant);
 
     function GetArrayItem(Index: Integer): TJsonDataValueHelper; inline;
     function GetArrayCount: Integer; inline;
@@ -321,6 +326,7 @@ type
     property BoolValue: Boolean read GetBoolValue write SetBoolValue;
     property ArrayValue: TJsonArray read GetArrayValue write SetArrayValue;
     property ObjectValue: TJsonObject read GetObjectValue write SetObjectValue;
+    property VariantValue: Variant read GetVariantValue write SetVariantValue;
 
     // Access to array item count
     property Count: Integer read GetArrayCount;
@@ -705,6 +711,7 @@ resourcestring
   RsInvalidJsonPath = 'Invalid JSON path "%s"';
   RsJsonPathContainsNullValue = 'JSON path contains null value ("%s")';
   RsJsonPathIndexError = 'JSON path index out of bounds (%d) "%s"';
+  RsVarTypeNotSupported = 'VarType not suported';
   {$IFDEF USE_FAST_STRASG_FOR_INTERNAL_STRINGS}
     {$IFDEF DEBUG}
   //RsInternAsgStringUsageError = 'InternAsgString was called on a string literal';
@@ -1110,6 +1117,26 @@ begin
     Dec(MaxLen);
   end;
   Value := V;
+end;
+
+function VarTypeToJsonDataType(AVarType: TVarType): TJsonDataType;
+begin
+  case AVartype of
+    varEmpty, varNull:
+      Result := jdtNone;
+    varOleStr, varString, varUString, varDate:
+      Result := jdtString;
+    varSmallInt, varInteger, varShortInt, varByte, varWord, varLongWord:
+      Result := jdtInt;
+    varInt64, varUInt64:
+      Result := jdtLong;
+    varSingle, varDouble, varCurrency:
+      Result := jdtFloat;
+    varBoolean:
+      Result := jdtBool;
+  else
+     raise EJsonCastException.Create(RsVarTypeNotSupported);
+  end;
 end;
 
 class function TJsonBaseObject.JSONToDateTime(const Value: string): TDateTime;
@@ -1642,6 +1669,51 @@ begin
     {$ELSE}
     TJsonObject(FValue.O) := AValue;
     {$ENDIF USE_FAST_AUTOREFCOUNT}
+  end;
+end;
+
+function TJsonDataValue.GetVariantValue: Variant;
+begin
+  case FTyp of
+    jdtNone:
+      Result := null;
+    jdtString:
+      Result := string(FValue.S);
+    jdtInt:
+      Result := FValue.I;
+    jdtLong:
+      Result := FValue.L;
+    jdtFloat:
+      Result := FValue.F;
+    jdtBool:
+      Result := FValue.B;
+  else
+    TypeCastError(jdtNone);
+    Result := null;
+  end;
+end;
+
+procedure TJsonDataValue.SetVariantValue(const AValue: Variant);
+var
+  LTyp: TJsonDataType;
+begin
+  if FTyp <> jdtNone then
+    Clear;
+  LTyp := VarTypeToJsonDataType(VarType(AValue));
+  if LTyp <> jdtNone then
+  begin
+    FTyp := LTyp;
+    case LTyp of
+      jdtString:
+        if VarType(AValue) = varDate then
+          string(FValue.S) := TJsonObject.DateTimeToJSON(AValue, False)
+        else
+          string(FValue.S) := AValue;
+      jdtInt: FValue.I := AValue;
+      jdtLong: FValue.L := AValue;
+      jdtFloat: FValue.F := AValue;
+      jdtBool: FValue.B := AValue;
+    end;
   end;
 end;
 
@@ -6061,6 +6133,17 @@ begin
     FData.FIntern.ObjectValue := Value
   else
     Self := Value;
+end;
+
+function TJsonDataValueHelper.GetVariantValue: Variant;
+begin
+  Result := FData.FIntern.VariantValue;
+end;
+
+procedure TJsonDataValueHelper.SetVariantValue(const Value: Variant);
+begin
+  ResolveName;
+  FData.FIntern.VariantValue := Value;
 end;
 
 function TJsonDataValueHelper.GetTyp: TJsonDataType;
