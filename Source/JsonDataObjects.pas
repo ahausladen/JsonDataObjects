@@ -252,7 +252,7 @@ type
     property BoolValue: Boolean read GetBoolValue write SetBoolValue;
     property ArrayValue: TJsonArray read GetArrayValue write SetArrayValue;
     property ObjectValue: TJsonObject read GetObjectValue write SetObjectValue;
-    property VariantValue: variant read GetVariantValue write SetVariantValue;
+    property VariantValue: Variant read GetVariantValue write SetVariantValue;
   end;
 
   // TJsonDataValueHelper is used to implement the "easy access" functionality. It is
@@ -287,13 +287,15 @@ type
     function GetObjectBool(const Name: string): Boolean; inline;
     function GetArray(const Name: string): TJsonArray; inline;
     function GetObject(const Name: string): TJsonDataValueHelper; inline;
+    function GetObjectVariant(const Name: string): Variant; inline;
     procedure SetObjectString(const Name, Value: string); inline;
     procedure SetObjectInt(const Name: string; const Value: Integer); inline;
     procedure SetObjectLong(const Name: string; const Value: Int64); inline;
     procedure SetObjectFloat(const Name: string; const Value: Double); inline;
     procedure SetObjectBool(const Name: string; const Value: Boolean); inline;
-    procedure SetArray(const Name: string; const AValue: TJsonArray); inline;
+    procedure SetArray(const Name: string; const Value: TJsonArray); inline;
     procedure SetObject(const Name: string; const Value: TJsonDataValueHelper); inline;
+    procedure SetObjectVariant(const Name: string; const Value: Variant); inline;
 
     function GetObjectPath(const Name: string): TJsonDataValueHelper; inline;
     procedure SetObjectPath(const Name: string; const Value: TJsonDataValueHelper); inline;
@@ -317,6 +319,8 @@ type
     class operator Implicit(const Value: TJsonObject): TJsonDataValueHelper; overload;
     class operator Implicit(const Value: TJsonDataValueHelper): TJsonObject; overload;
     class operator Implicit(const Value: Pointer): TJsonDataValueHelper; overload;
+    class operator Implicit(const Value: TJsonDataValueHelper): Variant; overload;
+    class operator Implicit(const Value: Variant): TJsonDataValueHelper; overload;
 
     property Typ: TJsonDataType read GetTyp;
     property Value: string read GetValue write SetValue;
@@ -342,6 +346,7 @@ type
     property A[const Name: string]: TJsonArray read GetArray write SetArray;
     // Used to auto create objects and as default property where no Implicit operator matches
     property O[const Name: string]: TJsonDataValueHelper read GetObject write SetObject; default;
+    property V[const Name: string]: Variant read GetObjectVariant write SetObjectVariant;
 
     property Path[const Name: string]: TJsonDataValueHelper read GetObjectPath write SetObjectPath;
   private
@@ -466,6 +471,7 @@ type
     function GetBool(Index: Integer): Boolean; inline;
     function GetArray(Index: Integer): TJsonArray; inline;
     function GetObject(Index: Integer): TJsonObject; inline;
+    function GetVariant(Index: Integer): Variant; inline;
 
     procedure SetString(Index: Integer; const Value: string); inline;
     procedure SetInt(Index: Integer; const Value: Integer); inline;
@@ -474,6 +480,7 @@ type
     procedure SetBool(Index: Integer; const Value: Boolean); inline;
     procedure SetArray(Index: Integer; const Value: TJsonArray); inline;
     procedure SetObject(Index: Integer; const Value: TJsonObject); inline;
+    procedure SetVariant(Index: Integer; const Value: Variant); inline;
 
     function GetItem(Index: Integer): PJsonDataValue; inline;
     function GetType(Index: Integer): TJsonDataType; inline;
@@ -520,6 +527,7 @@ type
     procedure Insert(Index: Integer; AValue: Boolean); overload;
     procedure Insert(Index: Integer; const AValue: TJsonArray); overload;
     procedure Insert(Index: Integer; const AValue: TJsonObject); overload;
+    procedure Insert(Index: Integer; const AValue: Variant); overload;
     function InsertArray(Index: Integer): TJsonArray;
     function InsertObject(Index: Integer): TJsonObject; overload;
     procedure InsertObject(Index: Integer; const Value: TJsonObject); overload; inline; // makes it easier to insert "null"
@@ -537,6 +545,7 @@ type
     property B[Index: Integer]: Boolean read GetBool write SetBool;
     property A[Index: Integer]: TJsonArray read GetArray write SetArray;
     property O[Index: Integer]: TJsonObject read GetObject write SetObject;
+    property V[Index: Integer]: Variant read GetVariant write SetVariant;
 
     property Items[Index: Integer]: PJsonDataValue read GetItem;
     property Count: Integer read FCount write SetCount;
@@ -712,7 +721,7 @@ resourcestring
   RsInvalidJsonPath = 'Invalid JSON path "%s"';
   RsJsonPathContainsNullValue = 'JSON path contains null value ("%s")';
   RsJsonPathIndexError = 'JSON path index out of bounds (%d) "%s"';
-  RsVarTypeNotSupported = 'VarType not suported';
+  RsVarTypeNotSupported = 'VarType %d is not supported';
   {$IFDEF USE_FAST_STRASG_FOR_INTERNAL_STRINGS}
     {$IFDEF DEBUG}
   //RsInternAsgStringUsageError = 'InternAsgString was called on a string literal';
@@ -943,6 +952,11 @@ begin
   {$IFEND}
 end;
 
+procedure ErrorUnsupportedVariantType(VarType: TVarType);
+begin
+  raise EJsonCastException.CreateResFmt(@RsVarTypeNotSupported, [VarType]);
+end;
+
 {$IFDEF USE_NAME_STRING_LITERAL}
 procedure AsgString(var Dest: string; const Source: string);
 begin
@@ -1122,7 +1136,7 @@ end;
 
 function VarTypeToJsonDataType(AVarType: TVarType): TJsonDataType;
 begin
-  case AVartype of
+  case AVarType of
     varEmpty, varNull:
       Result := jdtNone;
     varOleStr, varString, varUString, varDate:
@@ -1136,7 +1150,8 @@ begin
     varBoolean:
       Result := jdtBool;
   else
-     raise EJsonCastException.Create(RsVarTypeNotSupported);
+    ErrorUnsupportedVariantType(AVarType);
+    Result := jdtNone;
   end;
 end;
 
@@ -1677,7 +1692,7 @@ function TJsonDataValue.GetVariantValue: Variant;
 begin
   case FTyp of
     jdtNone:
-      Result := null;
+      Result := Null;
     jdtString:
       Result := string(FValue.S);
     jdtInt:
@@ -1688,9 +1703,15 @@ begin
       Result := FValue.F;
     jdtBool:
       Result := FValue.B;
+    jdtArray:
+      ErrorUnsupportedVariantType(varArray);
+    jdtObject:
+      if FValue.O = nil then
+        Result := Null // special handling for "null"
+      else
+        ErrorUnsupportedVariantType(varObject);
   else
-    TypeCastError(jdtNone);
-    Result := null;
+    ErrorUnsupportedVariantType(varAny);
   end;
 end;
 
@@ -1710,10 +1731,16 @@ begin
           string(FValue.S) := TJsonObject.DateTimeToJSON(AValue, False)
         else
           string(FValue.S) := AValue;
-      jdtInt: FValue.I := AValue;
-      jdtLong: FValue.L := AValue;
-      jdtFloat: FValue.F := AValue;
-      jdtBool: FValue.B := AValue;
+      jdtInt:
+        FValue.I := AValue;
+      jdtLong:
+        FValue.L := AValue;
+      jdtFloat:
+        FValue.F := AValue;
+      jdtBool:
+        FValue.B := AValue;
+//    else
+//      ErrorUnsupportedVariantType; handled by VarTypeToJsonDataType
     end;
   end;
 end;
@@ -3034,6 +3061,15 @@ begin
   Result := FItems[Index].ObjectValue;
 end;
 
+function TJsonArray.GetVariant(Index: Integer): Variant;
+begin
+  {$IFDEF CHECK_ARRAY_INDEX}
+  if Cardinal(Index) >= Cardinal(FCount) then
+    RaiseListError(Index);
+  {$ENDIF CHECK_ARRAY_INDEX}
+  Result := FItems[Index].VariantValue;
+end;
+
 function TJsonArray.GetInt(Index: Integer): Integer;
 begin
   {$IFDEF CHECK_ARRAY_INDEX}
@@ -3139,6 +3175,7 @@ procedure TJsonArray.Add(const AValue: Variant);
 var
   Data: PJsonDataValue;
 begin
+  VarTypeToJsonDataType(VarType(AValue)); // Handle type-check exception before adding the item
   Data := AddItem;
   Data.VariantValue := AValue;
 end;
@@ -3228,6 +3265,15 @@ var
 begin
   Data := InsertItem(Index);
   Data.Value := AValue;
+end;
+
+procedure TJsonArray.Insert(Index: Integer; const AValue: Variant);
+var
+  Data: PJsonDataValue;
+begin
+  VarTypeToJsonDataType(VarType(AValue)); // Handle type-check exception before inserting the item
+  Data := InsertItem(Index);
+  Data.VariantValue := AValue;
 end;
 
 function TJsonArray.InsertArray(Index: Integer): TJsonArray;
@@ -3335,6 +3381,15 @@ begin
     RaiseListError(Index);
   {$ENDIF CHECK_ARRAY_INDEX}
   FItems[Index].ObjectValue := Value;
+end;
+
+procedure TJsonArray.SetVariant(Index: Integer; const Value: Variant);
+begin
+  {$IFDEF CHECK_ARRAY_INDEX}
+  if Cardinal(Index) >= Cardinal(FCount) then
+    RaiseListError(Index);
+  {$ENDIF CHECK_ARRAY_INDEX}
+  FItems[Index].VariantValue := Value;
 end;
 
 function TJsonArray.GetType(Index: Integer): TJsonDataType;
@@ -6046,6 +6101,72 @@ begin
   Result.FData.FObj := nil;
 end;
 
+class operator TJsonDataValueHelper.Implicit(const Value: TJsonDataValueHelper): Variant;
+begin
+  if Value.FData.FIntern <> nil then
+    Result := Value.FData.FIntern.VariantValue
+  else
+    case Value.FData.FTyp of
+      jdtString:
+        Result := Value.FData.FValue;
+      jdtInt:
+        Result := Value.FData.FIntValue;
+      jdtLong:
+        Result := Value.FData.FLongValue;
+      jdtFloat:
+        Result := Value.FData.FFloatValue;
+      jdtBool:
+        Result := Value.FData.FBoolValue;
+      jdtNone:
+        Result := Null;
+      jdtArray:
+        ErrorUnsupportedVariantType(varArray);
+      jdtObject:
+        if Value.FData.FObj = nil then
+          Result := Null
+        else
+          ErrorUnsupportedVariantType(varObject);
+    else
+      ErrorUnsupportedVariantType(varAny);
+    end;
+end;
+
+class operator TJsonDataValueHelper.Implicit(const Value: Variant): TJsonDataValueHelper;
+var
+  LTyp: TJsonDataType;
+begin
+  Result.FData.FName := '';
+  Result.FData.FNameResolver := nil;
+  Result.FData.FIntern := nil;
+  {$IFDEF AUTOREFCOUNT}
+  if Result.FData.FObj <> nil then
+    Result.FData.FObj := nil;
+  {$ENDIF AUTOREFCOUNT}
+
+  LTyp := VarTypeToJsonDataType(VarType(Value));
+  if LTyp <> jdtNone then
+  begin
+    Result.FData.FTyp := LTyp;
+    case LTyp of
+      jdtString:
+        if VarType(Value) = varDate then
+          string(Result.FData.FValue) := TJsonObject.DateTimeToJSON(Value, False)
+        else
+          string(Result.FData.FValue) := Value;
+      jdtInt:
+        Result.FData.FIntValue := Value;
+      jdtLong:
+        Result.FData.FLongValue := Value;
+      jdtFloat:
+        Result.FData.FFloatValue := Value;
+      jdtBool:
+        Result.FData.FBoolValue := Value;
+    else
+      Result.FData.FTyp := jdtNone;
+    end;
+  end;
+end;
+
 function TJsonDataValueHelper.GetValue: string;
 begin
   Result := Self;
@@ -6146,13 +6267,16 @@ end;
 
 function TJsonDataValueHelper.GetVariantValue: Variant;
 begin
-  Result := FData.FIntern.VariantValue;
+  Result := Self;
 end;
 
 procedure TJsonDataValueHelper.SetVariantValue(const Value: Variant);
 begin
   ResolveName;
-  FData.FIntern.VariantValue := Value;
+  if FData.FIntern <> nil then
+    FData.FIntern.VariantValue := Value
+  else
+    Self := Value;
 end;
 
 function TJsonDataValueHelper.GetTyp: TJsonDataType;
@@ -6250,6 +6374,11 @@ begin
   Result := ObjectValue.Values[Name];
 end;
 
+function TJsonDataValueHelper.GetObjectVariant(const Name: string): Variant;
+begin
+  Result := ObjectValue.Values[Name];
+end;
+
 procedure TJsonDataValueHelper.SetObjectString(const Name, Value: string);
 begin
   ObjectValue.S[Name] := Value;
@@ -6275,12 +6404,17 @@ begin
   ObjectValue.B[Name] := Value;
 end;
 
-procedure TJsonDataValueHelper.SetArray(const Name: string; const AValue: TJsonArray);
+procedure TJsonDataValueHelper.SetArray(const Name: string; const Value: TJsonArray);
 begin
-  ObjectValue.A[Name] := AValue;
+  ObjectValue.A[Name] := Value;
 end;
 
 procedure TJsonDataValueHelper.SetObject(const Name: string; const Value: TJsonDataValueHelper);
+begin
+  ObjectValue.Values[Name] := Value;
+end;
+
+procedure TJsonDataValueHelper.SetObjectVariant(const Name: string; const Value: Variant);
 begin
   ObjectValue.Values[Name] := Value;
 end;
