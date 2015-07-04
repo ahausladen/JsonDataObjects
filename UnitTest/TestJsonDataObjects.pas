@@ -3,7 +3,8 @@ unit TestJsonDataObjects;
 interface
 
 uses
-  TestFramework, System.Classes, JsonDataObjects, System.SysUtils;
+  System.SysUtils, System.Classes, System.Variants,
+  TestFramework, JsonDataObjects;
 
 type
   TestTJsonBaseObject = class(TTestCase)
@@ -24,6 +25,8 @@ type
     procedure ParseBrokenJSON5;
     procedure ParseBrokenJSON6;
     procedure ParseBrokenJSON7;
+    procedure ObjectToVariantException;
+    procedure ArrayToVariantException;
   public
     procedure SetUp; override;
     procedure TearDown; override;
@@ -47,6 +50,7 @@ type
     procedure TestEmptyString;
     procedure TestToUTF8JSON;
     procedure TestInt64MaxIntX2;
+    procedure TestVariant;
   end;
 
   TestTJsonArray = class(TTestCase)
@@ -1306,6 +1310,88 @@ begin
     CheckEquals(-1, Value);
   finally
     JsonObject.Free;
+  end;
+end;
+
+procedure TestTJsonBaseObject.ObjectToVariantException;
+var
+  B: TJsonBaseObject;
+  O: TJsonObject;
+  V: Variant;
+begin
+  B := TJsonObject.Parse('{ "Object": {} }');
+  try
+    O := B as TJsonObject;
+    V := O['Object'].VariantValue;
+  finally
+    B.Free;
+  end;
+end;
+
+procedure TestTJsonBaseObject.ArrayToVariantException;
+var
+  B: TJsonBaseObject;
+  O: TJsonObject;
+  V: Variant;
+begin
+  B := TJsonObject.Parse('{ "Array": [] }');
+  try
+    O := B as TJsonObject;
+    V := O['Array'].VariantValue;
+  finally
+    B.Free;
+  end;
+end;
+
+procedure TestTJsonBaseObject.TestVariant;
+var
+  B: TJsonBaseObject;
+  O: TJsonObject;
+  V: Variant;
+begin
+  B := TJsonObject.Parse('{ "Key": 123, "Bool": true, "Bool2": false, "Null": null, "Float": -1.234567890E10, "Int64": 1234567890123456789, "Object": {}, "Array": [1, 2] }');
+  try
+    O := B as TJsonObject;
+
+    Check(O['Key'].VariantValue = 123, 'Int to Variant');
+    Check(O['Bool'].VariantValue = True, 'Boolean to Variant');
+    Check(O['Null'].VariantValue = Null, 'null to Variant');
+    Check(CompareFloatRelative(O['Float'].VariantValue, -1.234567890E10), 'Float to Variant');
+    Check(O['Int64'].VariantValue = 1234567890123456789, 'Int64 to Variant');
+
+    CheckException(ObjectToVariantException, EJsonCastException, 'Object to Variant exception');
+    CheckException(ArrayToVariantException, EJsonCastException, 'Array to Variant exception');
+
+    V := 'Hello';
+    O['Key'] := V;
+    Check(O['Key'].Typ = jdtString);
+    CheckEquals('Hello', O['Key'], 'Variant to String');
+
+    V := 1234567890;
+    O['Key'] := V;
+    Check(O['Key'].Typ = jdtInt);
+    CheckEquals(1234567890, O['Key'], 'Variant to Integer');
+
+    V := 1234567890123456;
+    O['Key'] := V;
+    Check(O['Key'].Typ = jdtLong);
+    CheckEquals(1234567890123456, O['Key'], 'Variant to Int64');
+
+    V := -1.2;
+    O['Key'] := V;
+    Check(O['Key'].Typ = jdtFloat);
+    Check(CompareFloatRelative(-1.2, O['Key']), 'Variant to Float');
+
+    V := True;
+    O['Key'] := V;
+    Check(O['Key'].Typ = jdtBool);
+    CheckTrue(O['Key'], 'Variant to Boolean');
+
+    V := Null;
+    O['Key'] := V;
+    Check(O['Key'].Typ = jdtNone);
+  finally
+    B.Free;
   end;
 end;
 
