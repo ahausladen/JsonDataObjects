@@ -755,6 +755,10 @@ const
   sNull = 'null';
   sQuoteChar = '"';
 
+  {$IF not declared(varObject)}
+  varObject = $0049;
+  {$IFEND}
+
 type
   PStrRec = ^TStrRec;
   TStrRec = packed record
