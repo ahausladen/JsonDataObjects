@@ -3825,7 +3825,7 @@ begin
   else
   begin
     for Result := 0 to FCount - 1 do
-      if (Length(P[Result]) = Len) and CompareMem(S, Pointer(P[Result]), Len) then
+      if (Length(P[Result]) = Len) and CompareMem(S, Pointer(P[Result]), Len * SizeOf(Char)) then
         Exit;
   end;
   Result := -1;

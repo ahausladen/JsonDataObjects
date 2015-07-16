@@ -2126,6 +2126,11 @@ begin
     Json.Path['First.Second.Third.Value'] := 'Hello';
     CheckEquals('{"First":{"Second":{"Third":{"Value":"Hello"}}}}', Json.ToJSON());
 
+    Json.Clear;
+    Json.Path['ferrcod'] := 2;
+    Json.Path['ferrmsg'] := 'Test';
+    CheckEquals('{"ferrcod":2,"ferrmsg":"Test"}', Json.ToJSON(True));
+
     FJson := Json;
     CheckException(TestPathError1, EJsonCastException);
     CheckException(TestPathError2, EJsonCastException);
