@@ -27,6 +27,7 @@ type
     procedure ParseBrokenJSON7;
     procedure ObjectToVariantException;
     procedure ArrayToVariantException;
+    procedure UnassigendVariantException;
   public
     procedure SetUp; override;
     procedure TearDown; override;
@@ -1343,6 +1344,18 @@ begin
   end;
 end;
 
+procedure TestTJsonBaseObject.UnassigendVariantException;
+var
+  O: TJsonObject;
+begin
+  O := TJsonObject.Create;
+  try
+    O['Key'].VariantValue := Unassigned;
+  finally
+    O.Free;
+  end;
+end;
+
 procedure TestTJsonBaseObject.TestVariant;
 var
   B: TJsonBaseObject;
@@ -1361,6 +1374,7 @@ begin
 
     CheckException(ObjectToVariantException, EJsonCastException, 'Object to Variant exception');
     CheckException(ArrayToVariantException, EJsonCastException, 'Array to Variant exception');
+    CheckException(UnassigendVariantException, EJsonCastException, 'VariantValue := Unassigend; exception');
 
     V := 'Hello';
     O['Key'] := V;
@@ -1389,7 +1403,13 @@ begin
 
     V := Null;
     O['Key'] := V;
-    Check(O['Key'].Typ = jdtNone);
+    Check(O['Key'].Typ = jdtObject);
+    Check(O['Key'].ObjectValue = nil);
+
+    V := O['NotSet'];
+    Check(O['NotSet'].Typ = jdtNone);
+    Check(VarIsEmpty(V), 'Variant unassigned');
+
   finally
     B.Free;
   end;

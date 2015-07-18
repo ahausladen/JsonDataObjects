@@ -1141,8 +1141,8 @@ end;
 function VarTypeToJsonDataType(AVarType: TVarType): TJsonDataType;
 begin
   case AVarType of
-    varEmpty, varNull:
-      Result := jdtNone;
+    varNull:
+      Result := jdtObject;
     varOleStr, varString, varUString, varDate:
       Result := jdtString;
     varSmallInt, varInteger, varShortInt, varByte, varWord, varLongWord:
@@ -1696,7 +1696,7 @@ function TJsonDataValue.GetVariantValue: Variant;
 begin
   case FTyp of
     jdtNone:
-      Result := Null;
+      Result := Unassigned;
     jdtString:
       Result := string(FValue.S);
     jdtInt:
@@ -6111,6 +6111,8 @@ begin
     Result := Value.FData.FIntern.VariantValue
   else
     case Value.FData.FTyp of
+      jdtNone:
+        Result := Unassigned;
       jdtString:
         Result := Value.FData.FValue;
       jdtInt:
@@ -6121,8 +6123,6 @@ begin
         Result := Value.FData.FFloatValue;
       jdtBool:
         Result := Value.FData.FBoolValue;
-      jdtNone:
-        Result := Null;
       jdtArray:
         ErrorUnsupportedVariantType(varArray);
       jdtObject:
@@ -6165,8 +6165,6 @@ begin
         Result.FData.FFloatValue := Value;
       jdtBool:
         Result.FData.FBoolValue := Value;
-    else
-      Result.FData.FTyp := jdtNone;
     end;
   end;
 end;
