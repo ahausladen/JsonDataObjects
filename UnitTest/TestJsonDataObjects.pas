@@ -1366,10 +1366,14 @@ begin
   try
     O := B as TJsonObject;
 
+    // did this here because right now we can't auto parse datetime values
+    O.D['DateTime'] := TJsonBaseObject.JSONToDateTime('2014-12-31T23:59:59.999Z');
+
     Check(O['Key'].VariantValue = 123, 'Int to Variant');
     Check(O['Bool'].VariantValue = True, 'Boolean to Variant');
     Check(O['Null'].VariantValue = Null, 'null to Variant');
     Check(CompareFloatRelative(O['Float'].VariantValue, -1.234567890E10), 'Float to Variant');
+    Check(CompareFloatRelative(O['DateTime'].VariantValue, TJsonBaseObject.JSONToDateTime('2014-12-31T23:59:59.999Z')), 'DateTime to Variant');
     Check(O['Int64'].VariantValue = 1234567890123456789, 'Int64 to Variant');
 
     CheckException(ObjectToVariantException, EJsonCastException, 'Object to Variant exception');
@@ -1395,6 +1399,11 @@ begin
     O['Key'] := V;
     Check(O['Key'].Typ = jdtFloat);
     Check(CompareFloatRelative(-1.2, O['Key']), 'Variant to Float');
+
+    V := TJsonBaseObject.JSONToDateTime('2014-12-31T23:59:59.999Z');
+    O['Key'] := V;
+    Check(O['Key'].Typ = jdtDateTime);
+    Check(CompareFloatRelative(TJsonBaseObject.JSONToDateTime('2014-12-31T23:59:59.999Z'), O['Key']), 'Variant to DateTime');
 
     V := True;
     O['Key'] := V;
@@ -1519,35 +1528,40 @@ begin
     Check(A.Types[12] = jdtFloat, 'jdtFloat');
     CheckEquals(1.12E5, A.F[12]);
 
-    A.Add(False);
+    A.Add(TJsonBaseObject.JSONToDateTime('2014-12-31T23:59:59.999Z'));
     CheckEquals(14, A.Count);
-    Check(A.Types[13] = jdtBool, 'jdtBool');
-    CheckEquals(False, A.B[13]);
+    Check(A.Types[13] = jdtDateTime, 'jdtDateTime');
+    CheckEquals(TJsonBaseObject.JSONToDateTime('2014-12-31T23:59:59.999Z'), A.F[13]);
+
+    A.Add(False);
+    CheckEquals(15, A.Count);
+    Check(A.Types[14] = jdtBool, 'jdtBool');
+    CheckEquals(False, A.B[14]);
 
     A.Add(TJsonObject(nil));
-    CheckEquals(15, A.Count);
-    Check(A.Types[14] = jdtObject, 'jdtObject');
-    CheckNull(A.O[14]);
+    CheckEquals(16, A.Count);
+    Check(A.Types[15] = jdtObject, 'jdtObject');
+    CheckNull(A.O[15]);
 
     A.Add(TJsonArray.Create);
-    CheckEquals(16, A.Count);
-    Check(A.Types[15] = jdtArray, 'jdtArray');
-    CheckNotNull(A.A[15]);
+    CheckEquals(17, A.Count);
+    Check(A.Types[16] = jdtArray, 'jdtArray');
+    CheckNotNull(A.A[16]);
 
     A.AddObject;
-    CheckEquals(17, A.Count);
-    Check(A.Types[16] = jdtObject, 'jdtObject');
-    CheckNotNull(A.O[16]);
+    CheckEquals(18, A.Count);
+    Check(A.Types[17] = jdtObject, 'jdtObject');
+    CheckNotNull(A.O[17]);
 
     A.AddArray;
-    CheckEquals(18, A.Count);
-    Check(A.Types[17] = jdtArray, 'jdtArray');
-    CheckNotNull(A.A[17]);
+    CheckEquals(19, A.Count);
+    Check(A.Types[18] = jdtArray, 'jdtArray');
+    CheckNotNull(A.A[18]);
 
     A.AddObject(nil);
-    CheckEquals(19, A.Count);
-    Check(A.Types[18] = jdtObject, 'jdtObject');
-    CheckNull(A.O[18]);
+    CheckEquals(20, A.Count);
+    Check(A.Types[19] = jdtObject, 'jdtObject');
+    CheckNull(A.O[19]);
   finally
     A.Free;
   end;
@@ -1616,7 +1630,7 @@ procedure TestTJsonArray.TestEnumerator;
 const
   //TODO DRY: extract DataTypeNames from TJsonDataValue.TypeCastError
   DataTypeNames: array[TJsonDataType] of string = (
-    'null', 'String', 'Integer', 'Long', 'Float', 'Bool', 'Array', 'Object'
+    'null', 'String', 'Integer', 'Long', 'Float', 'DateTime', 'Bool', 'Array', 'Object'
   );
 var
   A: TJsonArray;
@@ -1631,6 +1645,9 @@ begin
 
     A.FromJSON('[ 42, { "Key": "Value" }, true, null, 1234567890123456789, 1.12, "String", [ 1, 2, 3 ] ]');
 
+    // did this here because right now we can't auto parse datetime values
+    A.Add(TJsonBaseObject.JSONToDateTime('2014-12-31T23:59:59.999Z'));
+
     for Value in A do
     begin
       Typ := Value.Typ;
@@ -1644,6 +1661,7 @@ begin
         jdtInt:     CheckEquals(42, Value, 'Int value');
         jdtLong:    CheckEquals(1234567890123456789, Value, 'Long value');
         jdtFloat:   CheckEquals(1.12, Value, 0.001, 'Float value');
+        jdtDateTime:CheckEquals(TJsonBaseObject.JSONToDateTime('2014-12-31T23:59:59.999Z'), TDateTime(Value), 0.001, 'DateTime value');        // may be we need to add extended vartype overload?
         jdtBool:    CheckEquals(True, Value, 'Boolean value');
         jdtArray:   CheckEquals(3, Value.Count, 'Array count');
         jdtObject:  CheckEquals('Value', Value.S['Key'], 'Object value');
@@ -2067,7 +2085,7 @@ begin
       CheckEquals(135711131719232931, O.L['MyInt64']);
       CheckEquals(3.14159265359, O.F['MyDouble'], 0.000000000001);
       CheckEquals(False, O.B['MyBool']);
-      CheckEquals(TJsonBaseObject.DateTimeToJSON(dt, True), O.S['MyDateTime']);
+      CheckEquals(dt, O.D['MyDateTime']);
       CheckEquals('12.2', O.S['MyVariant']);
       CheckFalse(O.Contains('NonStored'), 'Contains(''NonStrored''');
     finally
@@ -2198,7 +2216,7 @@ procedure TestTJsonObject.TestEnumerator;
 const
   //TODO DRY: extract DataTypeNames from TJsonDataValue.TypeCastError
   DataTypeNames: array[TJsonDataType] of string = (
-    'null', 'String', 'Integer', 'Long', 'Float', 'Bool', 'Array', 'Object'
+    'null', 'String', 'Integer', 'Long', 'Float', 'DateTime', 'Bool', 'Array', 'Object'
   );
 var
   Obj: TJsonObject;
@@ -2211,8 +2229,13 @@ begin
     for Typ in [Low(TJsonDataType)..High(TJsonDataType)] do
       FoundTypes[Typ] := False;
 
+    FoundTypes[jdtDateTime] := True;
+
     Obj.FromJSON('{ "Int": 42, "Object": { "Key": "Value" }, "Bool": true, "Null": null, ' +
                    '"Long": 1234567890123456789, "Float": 1.12, "String": "Hello world!", "Array": [ 1, 2, 3 ] }');
+
+    // did this here because right now we can't auto parse datetime values
+    Obj.D['DateTime'] := TJsonBaseObject.JSONToDateTime('2014-12-31T23:59:59.999Z');
 
     for Pair in Obj do
     begin
@@ -2245,6 +2268,12 @@ begin
           begin
             CheckEquals('Float', Pair.Name, 'Float name');
             CheckEquals(1.12, Pair.Value, 0.001, 'Float value');
+          end;
+
+        jdtDateTime:
+          begin
+            CheckEquals('DateTime', Pair.Name, 'DateTime name');
+            CheckEquals(TJsonBaseObject.JSONToDateTime('2014-12-31T23:59:59.999Z'), Pair.Value, 0.001, 'DateTime value');
           end;
 
         jdtBool:
