@@ -2174,7 +2174,7 @@ begin
     jdtFloat:
       Writer.AppendValue(Buffer, DoubleToText(Buffer, FValue.F));
     jdtDateTime:
-      Writer.AppendValue(TJsonBaseObject.DateTimeToJSON(FValue.D,True));
+      TJsonBaseObject.StrToJSONStr(Writer.AppendStrValue, TJsonBaseObject.DateTimeToJSON(FValue.D,True));
     jdtBool:
       if FValue.B then
         Writer.AppendValue(sTrue)
