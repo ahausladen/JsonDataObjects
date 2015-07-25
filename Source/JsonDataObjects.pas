@@ -1839,6 +1839,11 @@ begin
         Result := sTrue
       else
         Result := sFalse;
+    jdtObject:
+      if FValue.O = nil then
+        Result := ''
+      else
+        TypeCastError(jdtString);
   else
     TypeCastError(jdtString);
     Result := '';
@@ -1891,6 +1896,11 @@ begin
       Result := Trunc(FValue.D);
     jdtBool:
       Result := Ord(FValue.B);
+    jdtObject:
+      if FValue.O = nil then
+        Result := 0
+      else
+        TypeCastError(jdtInt);
   else
     TypeCastError(jdtInt);
     Result := 0;
@@ -1929,6 +1939,11 @@ begin
       Result := Trunc(FValue.D);
     jdtBool:
       Result := Ord(FValue.B);
+    jdtObject:
+      if FValue.O = nil then
+        Result := 0
+      else
+        TypeCastError(jdtLong);
   else
     TypeCastError(jdtLong);
     Result := 0;
@@ -1966,6 +1981,11 @@ begin
       Result := FValue.D;
     jdtBool:
       Result := Ord(FValue.B);
+    jdtObject:
+      if FValue.O = nil then
+        Result := 0
+      else
+        TypeCastError(jdtFloat);
   else
     TypeCastError(jdtFloat);
     Result := 0;
@@ -2003,6 +2023,11 @@ begin
       Result := FValue.D;
     jdtBool:
       Result := Ord(FValue.B);
+    jdtObject:
+      if FValue.O = nil then
+        Result := 0
+      else
+        TypeCastError(jdtDateTime);
   else
     TypeCastError(jdtDateTime);
     Result := 0;
@@ -2040,6 +2065,11 @@ begin
       Result := FValue.D <> 0;
     jdtBool:
       Result := FValue.B;
+    jdtObject:
+      if FValue.O = nil then
+        Result := False
+      else
+        TypeCastError(jdtBool);
   else
     TypeCastError(jdtBool);
     Result := False;
