@@ -57,7 +57,7 @@ unit JsonDataObjects;
 {.$DEFINE ESCAPE_SLASH_AFTER_LESSTHAN}
 
 // When parsing a JSON string the pair names are interned to reduce the memory foot print. This
-// Slightly slows down the parser but saves a lot of memory if the JSON string contains repeating
+// slightly slows down the parser but saves a lot of memory if the JSON string contains repeating
 // pair names. The interning uses a hashset to store the strings.
 {$DEFINE USE_STRINGINTERN_FOR_NAMES}
 
@@ -398,6 +398,8 @@ type
   private
     class procedure StrToJSONStr(const AppendMethod: TWriterAppendMethod; const S: string); static;
     class procedure EscapeStrToJSONStr(F, P, EndP: PChar; const AppendMethod: TWriterAppendMethod); static;
+    class procedure DateTimeToJSONStr(const AppendMethod: TWriterAppendMethod;
+      const Value: TDateTime); static;
     class procedure InternInitAndAssignItem(Dest, Source: PJsonDataValue); static;
     class procedure GetStreamBytes(Stream: TStream; var Encoding: TEncoding; Utf8WithoutBOM: Boolean;
       var StreamInfo: TStreamInfo); static;
@@ -705,13 +707,15 @@ type
     LineBreak: string;
     IndentChar: string;
     UseUtcTime: Boolean;
+    NullConvertsToValueTypes: Boolean;
   end;
 
 var
-  JsonSerializationConfig: TJsonSerializationConfig = (
+  JsonSerializationConfig: TJsonSerializationConfig = ( // not thread-safe
     LineBreak: #10;
     IndentChar: #9;
     UseUtcTime: True;
+    NullConvertsToValueTypes: False;  // If Ture and an object is nil/null, a convert to String, Int, Long, Float, DateTime, Boolean will return ''/0/False
   );
 
 implementation
@@ -765,7 +769,7 @@ type
     jtkEof, jtkInvalidSymbol,
     jtkLBrace, jtkRBrace, jtkLBracket, jtkRBracket, jtkComma, jtkColon,
     jtkIdent,
-    jtkValue, jtkString, jtkInt, jtkLong, jtkFloat, jtkDateTime, jtkTrue, jtkFalse, jtkNull
+    jtkValue, jtkString, jtkInt, jtkLong, jtkFloat, jtkTrue, jtkFalse, jtkNull
   );
 
 const
@@ -773,7 +777,7 @@ const
     'end of file', 'invalid symbol',
     '"{"', '"}"', '"["', '"]"', '","', '":"',
     'identifier',
-    'value', 'value', 'value', 'value', 'value', 'value', 'value', 'value', 'value'
+    'value', 'value', 'value', 'value', 'value', 'value', 'value', 'value'
   );
 
   Power10: array[0..18] of Double = (
@@ -782,8 +786,10 @@ const
   );
 
   // XE7 broke string literal collapsing
-  sTrue = 'true';
-  sFalse = 'false';
+var
+  sTrue: string = 'true';
+  sFalse: string = 'false';
+const
   sNull = 'null';
   sQuoteChar = '"';
 
@@ -1507,12 +1513,6 @@ begin
         Next;
       end;
 
-    jtkDateTime:
-      begin
-        Data.InternAdd(FPropName, TDateTime(FLook.F));         // is this right??
-        Next;
-      end;
-
     jtkTrue:
       begin
         Data.InternAdd(FPropName, True);
@@ -1590,12 +1590,6 @@ begin
     jtkFloat:
       begin
         Data.Add(FLook.F);
-        Next;
-      end;
-
-    jtkDateTime:
-      begin
-        Data.Add(TDateTime(FLook.F));   // is this right ??
         Next;
       end;
 
@@ -1781,10 +1775,7 @@ begin
     FTyp := LTyp;
     case LTyp of
       jdtString:
-        if VarType(AValue) = varDate then
-          string(FValue.S) := TJsonObject.DateTimeToJSON(AValue, True)
-        else
-          string(FValue.S) := AValue;
+        string(FValue.S) := AValue;
       jdtInt:
         FValue.I := AValue;
       jdtLong:
@@ -1841,17 +1832,18 @@ begin
     jdtFloat:
       Result := FloatToStr(FValue.F, JSONFormatSettings);
     jdtDateTime:
-      Result := TJsonBaseObject.DateTimeToJson(FValue.F, True);
+      Result := TJsonBaseObject.DateTimeToJson(FValue.F, JsonSerializationConfig.UseUtcTime);
     jdtBool:
       if FValue.B then
         Result := sTrue
       else
         Result := sFalse;
     jdtObject:
-      if FValue.O = nil then
-        Result := ''
-      else
-        TypeCastError(jdtString);
+      begin
+        if not JsonSerializationConfig.NullConvertsToValueTypes or (FValue.O <> nil) then
+          TypeCastError(jdtString);
+        Result := '';
+      end;
   else
     TypeCastError(jdtString);
     Result := '';
@@ -1905,10 +1897,11 @@ begin
     jdtBool:
       Result := Ord(FValue.B);
     jdtObject:
-      if FValue.O = nil then
-        Result := 0
-      else
-        TypeCastError(jdtInt);
+      begin
+        if not JsonSerializationConfig.NullConvertsToValueTypes or (FValue.O <> nil) then
+          TypeCastError(jdtInt);
+        Result := 0;
+      end;
   else
     TypeCastError(jdtInt);
     Result := 0;
@@ -1948,10 +1941,11 @@ begin
     jdtBool:
       Result := Ord(FValue.B);
     jdtObject:
-      if FValue.O = nil then
-        Result := 0
-      else
-        TypeCastError(jdtLong);
+      begin
+        if not JsonSerializationConfig.NullConvertsToValueTypes or (FValue.O <> nil) then
+          TypeCastError(jdtLong);
+        Result := 0;
+      end;
   else
     TypeCastError(jdtLong);
     Result := 0;
@@ -1990,10 +1984,11 @@ begin
     jdtBool:
       Result := Ord(FValue.B);
     jdtObject:
-      if FValue.O = nil then
-        Result := 0
-      else
-        TypeCastError(jdtFloat);
+      begin
+        if not JsonSerializationConfig.NullConvertsToValueTypes or (FValue.O <> nil) then
+          TypeCastError(jdtFloat);
+        Result := 0;
+      end;
   else
     TypeCastError(jdtFloat);
     Result := 0;
@@ -2032,10 +2027,11 @@ begin
     jdtBool:
       Result := Ord(FValue.B);
     jdtObject:
-      if FValue.O = nil then
-        Result := 0
-      else
-        TypeCastError(jdtDateTime);
+      begin
+        if not JsonSerializationConfig.NullConvertsToValueTypes or (FValue.O <> nil) then
+          TypeCastError(jdtDateTime);
+        Result := 0;
+      end;
   else
     TypeCastError(jdtDateTime);
     Result := 0;
@@ -2074,10 +2070,11 @@ begin
     jdtBool:
       Result := FValue.B;
     jdtObject:
-      if FValue.O = nil then
-        Result := False
-      else
-        TypeCastError(jdtBool);
+      begin
+        if not JsonSerializationConfig.NullConvertsToValueTypes or (FValue.O <> nil) then
+          TypeCastError(jdtBool);
+        Result := False;
+      end;
   else
     TypeCastError(jdtBool);
     Result := False;
@@ -2212,7 +2209,7 @@ begin
     jdtFloat:
       Writer.AppendValue(Buffer, DoubleToText(Buffer, FValue.F));
     jdtDateTime:
-      TJsonBaseObject.StrToJSONStr(Writer.AppendStrValue, TJsonBaseObject.DateTimeToJSON(FValue.D,True));
+      TJsonBaseObject.DateTimeToJSONStr(Writer.AppendStrValue, FValue.D); // do the conversion in a function to prevent the compiler from creating a string intermediate in this method
     jdtBool:
       if FValue.B then
         Writer.AppendValue(sTrue)
@@ -2282,6 +2279,16 @@ begin
   end
   else
     AppendMethod(nil, 0);
+end;
+
+class procedure TJsonBaseObject.DateTimeToJSONStr(const AppendMethod: TWriterAppendMethod; const Value: TDateTime);
+var
+  S: string;
+begin
+  S := TJsonBaseObject.DateTimeToJSON(Value, JsonSerializationConfig.UseUtcTime);
+  // StrToJSONStr isn't necessary because the date-time string doesn't contain any char
+  // that must be escaped.
+  AppendMethod(PChar(S), Length(S));
 end;
 
 class procedure TJsonBaseObject.EscapeStrToJSONStr(F, P, EndP: PChar; const AppendMethod: TWriterAppendMethod);
@@ -6085,7 +6092,7 @@ begin
       jdtFloat:
         Result := FloatToStr(Value.FData.FFloatValue, JSONFormatSettings);
       jdtDateTime:
-        Result := TJsonBaseObject.DateTimeToJSON(Value.FData.FDateTimeValue, True);
+        Result := TJsonBaseObject.DateTimeToJSON(Value.FData.FDateTimeValue, JsonSerializationConfig.UseUtcTime);
       jdtBool:
         if Value.FData.FBoolValue then
           Result := sTrue
@@ -7126,6 +7133,10 @@ initialization
   {$IFDEF USE_NAME_STRING_LITERAL}
   InitializeJsonMemInfo;
   {$ENDIF USE_NAME_STRING_LITERAL}
+  // Make sTrue and sFalse a mutable string (RefCount<>-1) so that UStrAsg doesn't always
+  // create a new string.
+  UniqueString(sTrue);
+  UniqueString(sFalse);
   JSONFormatSettings.DecimalSeparator := '.';
 
 end.

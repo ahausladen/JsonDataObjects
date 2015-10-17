@@ -1,7 +1,7 @@
 Json Data Objects
 =================
 
-This Delphi unit contains a JSON parser that supports Delphi 2009-XE7 and the platforms
+This Delphi unit contains a JSON parser that supports Delphi 2009-10Seattle and the platforms
 Win32, Win64 and ARM Android (MacOS and iOS may work).
 
 Clone with GIT
@@ -27,7 +27,8 @@ Features
 * Automatic creation of arrays and objects
 * Easy access mode with implicit operators
 * Compact and formatted output modes
-* Variants support, Null is treated as an object and can't be auto-typecasted to a value type
+* Variants support
+* Null can be auto-typecasted to a value type if JsonSerializationConfig.NullConvertsToValueTypes is set to True
 * Win32, Win64 and ARM Android support (MacOS and iOS may work)
 
 Usage
