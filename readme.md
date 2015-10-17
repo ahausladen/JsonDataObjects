@@ -27,6 +27,7 @@ Features
 * Automatic creation of arrays and objects
 * Easy access mode with implicit operators
 * Compact and formatted output modes
+* Variants support, Null is treated as an object and can't be auto-typecasted to a value type
 * Win32, Win64 and ARM Android support (MacOS and iOS may work)
 
 Usage
