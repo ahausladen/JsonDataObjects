@@ -711,6 +711,14 @@ uses
   Variants, RTLConsts, TypInfo, Math, SysConst;
   {$ENDIF HAS_UNIT_SCOPE}
 
+{$IF SizeOf(LongWord) <> 4}
+// Make LongWord on all platforms a UInt32. Why does the programming language need to use a different
+// interpretation for different platforms. This makes working with it a mess.
+type
+  LongWord = UInt32;
+  PLongWord = ^LongWord;
+{$IFEND}
+
 resourcestring
   RsUnsupportedFileEncoding = 'File encoding is not supported';
   RsUnexpectedEndOfFile = 'Unexpected end of file where %s was expected';
