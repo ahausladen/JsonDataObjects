@@ -801,7 +801,7 @@ type
   PStrRec = ^TStrRec;
   TStrRec = packed record
     {$IFDEF CPUX64}
-    _Padding: LongInt;
+    _Padding: Longint;
     {$ENDIF CPUX64}
     CodePage: Word;
     ElemSize: Word;
@@ -7062,9 +7062,9 @@ begin
   SetPointer(nil, 0);
 end;
 
-function TJsonUTF8StringStream.Realloc(var NewCapacity: Integer): Pointer;
+function TJsonUTF8StringStream.Realloc(var NewCapacity: Longint): Pointer;
 var
-  L: Integer;
+  L: Longint;
 begin
   if NewCapacity <> Capacity then
   begin
@@ -7100,9 +7100,9 @@ begin
   SetPointer(nil, 0);
 end;
 
-function TJsonBytesStream.Realloc(var NewCapacity: Integer): Pointer;
+function TJsonBytesStream.Realloc(var NewCapacity: Longint): Pointer;
 var
-  L: Integer;
+  L: Longint;
 begin
   if NewCapacity <> Capacity then
   begin
