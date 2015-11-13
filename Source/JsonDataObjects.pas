@@ -801,12 +801,12 @@ type
   PStrRec = ^TStrRec;
   TStrRec = packed record
     {$IFDEF CPUX64}
-    _Padding: Longint;
+    _Padding: Integer;
     {$ENDIF CPUX64}
     CodePage: Word;
     ElemSize: Word;
-    RefCnt: Longint;
-    Length: Longint;
+    RefCnt: Integer;
+    Length: Integer;
   end;
 
   // TEncodingStrictAccess gives us access to the strict protected functions which are much easier
@@ -1002,7 +1002,7 @@ end;
 {$IFDEF USE_NAME_STRING_LITERAL}
 procedure AsgString(var Dest: string; const Source: string);
 begin
-  if (Pointer(Source) <> nil) and (PLongInt(@PByte(Source)[-8])^ = -1) and // string literal
+  if (Pointer(Source) <> nil) and (PInteger(@PByte(Source)[-8])^ = -1) and // string literal
      ((PByte(Source) < JsonMemInfoBlockEnd) and (PByte(Source) >= JsonMemInfoBlockStart)) or
      ((PByte(Source) < JsonMemInfoMainBlockEnd) and (PByte(Source) >= JsonMemInfoMainBlockStart)) then
   begin
@@ -2264,7 +2264,7 @@ begin
   if P <> nil then
   begin
     //EndP := P + Length(S);  inlined Length introduces too much unnecessary code
-    EndP := P + PLongInt(@PByte(S)[-4])^;
+    EndP := P + PInteger(@PByte(S)[-4])^;
 
     // find the first char that must be escaped
     F := P;
@@ -3698,7 +3698,7 @@ end;
 {$IFDEF USE_LAST_NAME_STRING_LITERAL_CACHE}
 procedure TJsonObject.UpdateLastValueItem(const Name: string; Item: PJsonDataValue);
 begin
-  if (Pointer(Name) <> nil) and (PLongInt(@PByte(Name)[-8])^ = -1) then // string literal
+  if (Pointer(Name) <> nil) and (PInteger(@PByte(Name)[-8])^ = -1) then // string literal
   begin
     FLastValueItem := Item;
     FLastValueItemNamePtr := Pointer(Name);
@@ -4668,12 +4668,12 @@ begin
       if Source <> nil then
       begin
         {$IFDEF DEBUG}
-        //if PLongInt(@PByte(Source)[-8])^ = -1 then
+        //if PInteger(@PByte(Source)[-8])^ = -1 then
         //  InternAsgStringUsageError;
         {$ENDIF DEBUG}
         Pointer(PropName) := Source;
         // We are parsing JSON, no other thread knowns about the string => skip the CPU lock
-        Inc(PLongInt(@PByte(Source)[-8])^);
+        Inc(PInteger(@PByte(Source)[-8])^);
       end;
       {$ELSE}
       PropName := FStrings[Index].Name;
@@ -4700,7 +4700,7 @@ begin
   P := PChar(Pointer(Name));
   if P <> nil then
   begin
-    Result := PLongint(@PByte(Name)[-4])^;
+    Result := PInteger(@PByte(Name)[-4])^;
     while True do
     begin
       Ch := Word(P[0]);
@@ -4745,7 +4745,7 @@ begin
     Next := Bucket^;
     Hash := AHash;
     Pointer(Name) := Pointer(S);
-    Inc(PLongint(@PByte(Name)[-8])^);
+    Inc(PInteger(@PByte(Name)[-8])^);
   end;
   Bucket^ := Index;
 end;
