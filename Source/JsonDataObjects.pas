@@ -800,9 +800,9 @@ const
 type
   PStrRec = ^TStrRec;
   TStrRec = packed record
-    {$IFDEF CPUX64}
+    {$IF defined(CPUX64) or defined(CPU64BITS)} // XE2-XE7 (CPUX64), XE8+ (CPU64BITS)
     _Padding: Integer;
-    {$ENDIF CPUX64}
+    {$IFEND}
     CodePage: Word;
     ElemSize: Word;
     RefCnt: Integer;
