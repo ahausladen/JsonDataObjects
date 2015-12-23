@@ -1003,8 +1003,8 @@ end;
 procedure AsgString(var Dest: string; const Source: string);
 begin
   if (Pointer(Source) <> nil) and (PInteger(@PByte(Source)[-8])^ = -1) and // string literal
-     ((PByte(Source) < JsonMemInfoBlockEnd) and (PByte(Source) >= JsonMemInfoBlockStart)) or
-     ((PByte(Source) < JsonMemInfoMainBlockEnd) and (PByte(Source) >= JsonMemInfoMainBlockStart)) then
+     (((PByte(Source) < JsonMemInfoBlockEnd) and (PByte(Source) >= JsonMemInfoBlockStart)) or
+      ((PByte(Source) < JsonMemInfoMainBlockEnd) and (PByte(Source) >= JsonMemInfoMainBlockStart))) then
   begin
     // Save memory by just using the string literal but only if it is in the EXE's or this DLL's
     // code segment. Otherwise the memory could be released by a FreeLibrary call without us knowning.
