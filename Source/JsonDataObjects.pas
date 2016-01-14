@@ -715,7 +715,7 @@ var
     LineBreak: #10;
     IndentChar: #9;
     UseUtcTime: True;
-    NullConvertsToValueTypes: False;  // If Ture and an object is nil/null, a convert to String, Int, Long, Float, DateTime, Boolean will return ''/0/False
+    NullConvertsToValueTypes: False;  // If True and an object is nil/null, a convertion to String, Int, Long, Float, DateTime, Boolean will return ''/0/False
   );
 
 implementation
