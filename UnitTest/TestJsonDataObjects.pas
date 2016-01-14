@@ -2253,6 +2253,20 @@ begin
     Json.Path['ferrmsg'] := 'Test';
     CheckEquals('{"ferrcod":2,"ferrmsg":"Test"}', Json.ToJSON(True));
 
+    Json.FromJSON(' { "First" : [ { "Second": { "Third": { Value: "Hello World!" } } }, { "Fourth": "Nothing to see" }, "String" ] }');
+    CheckEqualsString('Hello World!', Json.Path['First'].Items[0].Path['Second.Third.Value']);
+    CheckEqualsString('Nothing to see', Json.Path['First[1].Fourth']);
+    Check(Json.Path['First'].Typ = jdtArray);
+    Check(Json.Path['First[0]'].Typ = jdtObject);
+    Check(Json.Path['First[0].Second'].Typ = jdtObject);
+    Check(Json.Path['First[0].Second.Third'].Typ = jdtObject);
+    CheckEquals('Hello World!', Json.Path['First[0].Second.Third'].S['Value']);
+    Check(Json.Path['First[0].Second.Third.Value'].Typ = jdtString);
+    CheckEquals('Hello World!', Json.Path['First[0].Second.Third.Value']);
+
+    Json.FromJSON('{"menu": { "header": "SVG Viewer", "items": [ {"id": "Open"}, {"id": "OpenNew", "label": "Open New"}, null, {"id": "Help"}, {"id": "About", "label": "About Adobe CVG Viewer..."} ] }}');
+    CheckEquals('Help', Json.Path['menu.items[3].id']);
+
     FJson := Json;
     CheckException(TestPathError1, EJsonCastException);
     CheckException(TestPathError2, EJsonCastException);
