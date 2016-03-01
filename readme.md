@@ -29,6 +29,7 @@ Features
 * Compact and formatted output modes
 * Variants support
 * Null can be auto-typecasted to a value type if JsonSerializationConfig.NullConvertsToValueTypes is set to True
+* Progress callback support for loading large JSON strings
 * Win32, Win64 and ARM Android support (MacOS and iOS may work)
 
 Usage
