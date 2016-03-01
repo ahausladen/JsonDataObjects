@@ -2477,8 +2477,15 @@ begin
 
     // find the first char that must be escaped
     F := P;
-    while (P < EndP) and not (P^ in [#0..#31, '\', '"' {$IFDEF ESCAPE_SLASH_AFTER_LESSTHAN}, '/'{$ENDIF}]) do
-      Inc(P);
+//    DCC64 generates "bt mem,reg" code
+//    while (P < EndP) and not (P^ in [#0..#31, '\', '"' {$IFDEF ESCAPE_SLASH_AFTER_LESSTHAN}, '/'{$ENDIF}]) do
+//      Inc(P);
+    while P < EndP do
+      case P^ of
+        #0..#31, '\', '"' {$IFDEF ESCAPE_SLASH_AFTER_LESSTHAN}, '/'{$ENDIF}: Break;
+      else
+        Inc(P);
+      end;
 
     // nothing found, than it is easy
     if P = EndP then
@@ -2547,8 +2554,15 @@ begin
         end;
         Inc(P);
         F := P;
-        while (P < EndP) and not (P^ in [#0..#31, '\', '"' {$IFDEF ESCAPE_SLASH_AFTER_LESSTHAN}, '/'{$ENDIF}]) do
-          Inc(P);
+//        DCC64 generates "bt mem,reg" code
+//        while (P < EndP) and not (P^ in [#0..#31, '\', '"' {$IFDEF ESCAPE_SLASH_AFTER_LESSTHAN}, '/'{$ENDIF}]) do
+//          Inc(P);
+        while P < EndP do
+          case P^ of
+            #0..#31, '\', '"' {$IFDEF ESCAPE_SLASH_AFTER_LESSTHAN}, '/'{$ENDIF}: Break;
+          else
+            Inc(P);
+          end;
       end
       else
         Break;
@@ -4779,11 +4793,19 @@ begin
 
     // fast forward
     Ch := P^;
-    while not (Ch in [#0, '[', '.']) do
-    begin
-      Inc(P);
-      Ch := P^;
-    end;
+//    DCC64 generates "bt mem,reg" code
+//    while not (Ch in [#0, '[', '.']) do
+//    begin
+//      Inc(P);
+//      Ch := P^;
+//    end;
+    while True do
+      case Ch of
+        #0, '[', '.': Break;
+      else
+        Inc(P);
+        Ch := P^;
+      end;
 
     EndF := P;
     if F = EndF then
@@ -5862,8 +5884,16 @@ begin
     Ord('A')..Ord('Z'), Ord('a')..Ord('z'), Ord('_'), Ord('$'):
       begin
         Inc(P);
-        while (P < EndP) and (P^ in [Ord('A')..Ord('Z'), Ord('a')..Ord('z'), Ord('_'), Ord('0')..Ord('9')]) do
-          Inc(P);
+//        DCC64 generates "bt mem,reg" code
+//        while (P < EndP) and (P^ in [Ord('A')..Ord('Z'), Ord('a')..Ord('z'), Ord('_'), Ord('0')..Ord('9')]) do
+//          Inc(P);
+        while P < EndP do
+          case P^ of
+            Ord('A')..Ord('Z'), Ord('a')..Ord('z'), Ord('_'), Ord('0')..Ord('9'): Inc(P);
+          else
+            Break;
+          end;
+
         L := P - F;
         if L = 4 then
         begin
@@ -6372,8 +6402,16 @@ begin
     'A'..'Z', 'a'..'z', '_', '$':
       begin
         Inc(P);
-        while (P < EndP) and (P^ in ['A'..'Z', 'a'..'z', '_', '0'..'9']) do
-          Inc(P);
+//        DCC64 generates "bt mem,reg" code
+//        while (P < EndP) and (P^ in ['A'..'Z', 'a'..'z', '_', '0'..'9']) do
+//          Inc(P);
+        while P < EndP do
+          case P^ of
+            'A'..'Z', 'a'..'z', '_', '0'..'9': Inc(P);
+          else
+            Break;
+          end;
+
         L := P - F;
         if L = 4 then
         begin
