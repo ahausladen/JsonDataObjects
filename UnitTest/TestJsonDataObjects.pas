@@ -9,6 +9,7 @@ uses
 type
   TestTJsonBaseObject = class(TTestCase)
   private
+    FProgressSteps: array of NativeInt;
     procedure LoadFromEmptyStream;
     procedure LoadFromArrayStreamIntoObject;
     procedure ParseUtf8BrokenJSON1;
@@ -56,6 +57,7 @@ type
     procedure TestVariant;
     procedure TestVariantNull;
     procedure TestUInt64;
+    procedure TestProgress;
   end;
 
   TestTJsonArray = class(TTestCase)
@@ -1501,7 +1503,73 @@ begin
   Json := TJsonObject.Parse(S1) as TJsonObject;
   try
     S2 := Json.ToJSON;
-    CheckEquals(S2, S1);
+    CheckEquals(S1, S2, 'UInt64 mismatch');
+  finally
+    Json.Free;
+  end;
+end;
+
+procedure JsonProgress(Data: Pointer; Percentage: Integer; Position, Size: NativeInt);
+var
+  Test: TestTJsonBaseObject;
+  Index: Integer;
+begin
+  Test := TestTJsonBaseObject(Data);
+  Index := Length(Test.FProgressSteps);
+  SetLength(Test.FProgressSteps, Index + 1);
+  Test.FProgressSteps[Index] := Position;
+end;
+
+procedure TestTJsonBaseObject.TestProgress;
+const
+  S = '{"fieldname":"abcdefghijklmnopqrstuvwxyz","next":{"test":"test", "data":1234}}';
+var
+  Json: TJsonObject;
+  Progress: TJsonReaderProgressRec;
+  I: Integer;
+  LargeJson: UTF8String;
+begin
+  // Call Progress if byte position changed
+  FProgressSteps := nil;
+  Json := TJDOJsonArray.ParseUtf8(S, Progress.Init(JsonProgress, Self, 1)) as TJsonObject;
+  try
+    CheckTrue(Length(FProgressSteps) > 2);
+
+    CheckEquals(0, FProgressSteps[0]);
+    CheckEquals(Length(S) * SizeOf(Byte), FProgressSteps[Length(FProgressSteps) - 1]);
+
+    // values must be monotonically increasing
+    I := 1;
+    while I < Length(FProgressSteps) do
+    begin
+      CheckTrue(FProgressSteps[I - 1] < FProgressSteps[I], 'monotonically increasing');
+      Inc(I);
+    end;
+
+    for I := 0 to 100000 do
+      Json.A['MyArray'].Add('Index: ' + IntToStr(I));
+    LargeJson := Json.ToUtf8JSON();
+  finally
+    Json.Free;
+  end;
+
+  // Call Progress only if percentage changed
+  FProgressSteps := nil;
+  Json := TJDOJsonArray.ParseUtf8(LargeJson, Progress.Init(JsonProgress, Self)) as TJsonObject;
+  try
+    CheckTrue(Length(FProgressSteps) > 2);
+    CheckEquals(100 + 1, Length(FProgressSteps)); // 0, 1, 2, ..., 99, 100
+
+    CheckEquals(0, FProgressSteps[0]);
+    CheckEquals(Length(LargeJson) * SizeOf(Byte), FProgressSteps[Length(FProgressSteps) - 1]);
+
+    // values must be monotonically increasing
+    I := 1;
+    while I < Length(FProgressSteps) do
+    begin
+      CheckTrue(FProgressSteps[I - 1] < FProgressSteps[I], 'monotonically increasing');
+      Inc(I);
+    end;
   finally
     Json.Free;
   end;

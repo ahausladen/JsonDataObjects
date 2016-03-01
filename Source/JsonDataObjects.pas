@@ -48,6 +48,9 @@ unit JsonDataObjects;
 {$ENDIF VER200}
 
 
+// Enables the progress callback feature
+{$DEFINE SUPPORT_PROGRESS}
+
 // Sanity checks all array index accesses and raise an EListError exception.
 {$DEFINE CHECK_ARRAY_INDEX}
 
@@ -119,6 +122,19 @@ type
   EJsonParserException = class(EJsonException);
   EJsonCastException = class(EJsonException);
   EJsonPathException = class(EJsonException);
+
+  {$IFDEF SUPPORT_PROGRESS}
+  TJsonReaderProgressProc = procedure(Data: Pointer; Percentage: Integer; Position, Size: NativeInt);
+
+  PJsonReaderProgressRec = ^TJsonReaderProgressRec;
+  TJsonReaderProgressRec = record
+    Data: Pointer;        // used for the first Progress() parameter
+    Threshold: NativeInt; // 0: Call only if percentage changed; greater than 0: call after n processed bytes
+    Progress: TJsonReaderProgressProc;
+
+    function Init(AProgress: TJsonReaderProgressProc; AData: Pointer = nil; AThreshold: NativeInt = 0): PJsonReaderProgressRec;
+  end;
+  {$ENDIF SUPPORT_PROGRESS}
 
   // TJsonOutputWriter is used to write the JSON data to a string, stream or TStrings in a compact
   // or human readable format.
@@ -438,19 +454,19 @@ type
     // If the JSON string starts with a "[" then the returned object is a TJsonArray otherwise
     // it is a TJsonObject.
     {$IFNDEF NEXTGEN}
-    class function ParseUtf8(S: PAnsiChar; Len: Integer = -1): TJsonBaseObject; overload; static; inline;
-    class function ParseUtf8(const S: UTF8String): TJsonBaseObject; overload; static; inline;
+    class function ParseUtf8(S: PAnsiChar; Len: Integer = -1{$IFDEF SUPPORT_PROGRESS}; AProgress: PJsonReaderProgressRec = nil{$ENDIF}): TJsonBaseObject; overload; static; inline;
+    class function ParseUtf8(const S: UTF8String{$IFDEF SUPPORT_PROGRESS}; AProgress: PJsonReaderProgressRec = nil{$ENDIF}): TJsonBaseObject; overload; static; inline;
     {$ENDIF ~NEXTGEN}
-    class function ParseUtf8Bytes(S: PByte; Len: Integer = -1): TJsonBaseObject; overload; static;
-    class function Parse(S: PWideChar; Len: Integer = -1): TJsonBaseObject; overload; static;
-    class function Parse(const S: UnicodeString): TJsonBaseObject; overload; static; inline;
+    class function ParseUtf8Bytes(S: PByte; Len: Integer = -1{$IFDEF SUPPORT_PROGRESS}; AProgress: PJsonReaderProgressRec = nil{$ENDIF}): TJsonBaseObject; overload; static;
+    class function Parse(S: PWideChar; Len: Integer = -1{$IFDEF SUPPORT_PROGRESS}; AProgress: PJsonReaderProgressRec = nil{$ENDIF}): TJsonBaseObject; overload; static;
+    class function Parse(const S: UnicodeString{$IFDEF SUPPORT_PROGRESS}; AProgress: PJsonReaderProgressRec = nil{$ENDIF}): TJsonBaseObject; overload; static; inline;
     class function Parse(const Bytes: TBytes; Encoding: TEncoding = nil; ByteIndex: Integer = 0;
-      ByteCount: Integer = -1): TJsonBaseObject; overload; static;
-    class function ParseFromFile(const FileName: string; Utf8WithoutBOM: Boolean = True): TJsonBaseObject; static;
-    class function ParseFromStream(Stream: TStream; Encoding: TEncoding = nil; Utf8WithoutBOM: Boolean = True): TJsonBaseObject; static;
+      ByteCount: Integer = -1{$IFDEF SUPPORT_PROGRESS}; AProgress: PJsonReaderProgressRec = nil{$ENDIF}): TJsonBaseObject; overload; static;
+    class function ParseFromFile(const FileName: string; Utf8WithoutBOM: Boolean = True{$IFDEF SUPPORT_PROGRESS}; AProgress: PJsonReaderProgressRec = nil{$ENDIF}): TJsonBaseObject; static;
+    class function ParseFromStream(Stream: TStream; Encoding: TEncoding = nil; Utf8WithoutBOM: Boolean = True{$IFDEF SUPPORT_PROGRESS}; AProgress: PJsonReaderProgressRec = nil{$ENDIF}): TJsonBaseObject; static;
 
-    procedure LoadFromFile(const FileName: string; Utf8WithoutBOM: Boolean = True);
-    procedure LoadFromStream(Stream: TStream; Encoding: TEncoding = nil; Utf8WithoutBOM: Boolean = True);
+    procedure LoadFromFile(const FileName: string; Utf8WithoutBOM: Boolean = True{$IFDEF SUPPORT_PROGRESS}; AProgress: PJsonReaderProgressRec = nil{$ENDIF});
+    procedure LoadFromStream(Stream: TStream; Encoding: TEncoding = nil; Utf8WithoutBOM: Boolean = True{$IFDEF SUPPORT_PROGRESS}; AProgress: PJsonReaderProgressRec = nil{$ENDIF});
     procedure SaveToFile(const FileName: string; Compact: Boolean = True; Encoding: TEncoding = nil; Utf8WithoutBOM: Boolean = True);
     procedure SaveToStream(Stream: TStream; Compact: Boolean = True; Encoding: TEncoding = nil; Utf8WithoutBOM: Boolean = True);
     procedure SaveToLines(Lines: TStrings);
@@ -458,12 +474,12 @@ type
     // FromXxxJSON() raises an EJsonParserException if you try to parse an array JSON string into a
     // TJsonObject or a object JSON string into a TJsonArray.
     {$IFNDEF NEXTGEN}
-    procedure FromUtf8JSON(const S: UTF8String); overload; inline;
-    procedure FromUtf8JSON(S: PAnsiChar; Len: Integer = -1); overload; inline;
+    procedure FromUtf8JSON(const S: UTF8String{$IFDEF SUPPORT_PROGRESS}; AProgress: PJsonReaderProgressRec = nil{$ENDIF}); overload; inline;
+    procedure FromUtf8JSON(S: PAnsiChar; Len: Integer = -1{$IFDEF SUPPORT_PROGRESS}; AProgress: PJsonReaderProgressRec = nil{$ENDIF}); overload; inline;
     {$ENDIF ~NEXTGEN}
-    procedure FromUtf8JSON(S: PByte; Len: Integer = -1); overload;
-    procedure FromJSON(const S: UnicodeString); overload;
-    procedure FromJSON(S: PWideChar; Len: Integer = -1); overload;
+    procedure FromUtf8JSON(S: PByte; Len: Integer = -1{$IFDEF SUPPORT_PROGRESS}; AProgress: PJsonReaderProgressRec = nil{$ENDIF}); overload;
+    procedure FromJSON(const S: UnicodeString{$IFDEF SUPPORT_PROGRESS}; AProgress: PJsonReaderProgressRec = nil{$ENDIF}); overload;
+    procedure FromJSON(S: PWideChar; Len: Integer = -1{$IFDEF SUPPORT_PROGRESS}; AProgress: PJsonReaderProgressRec = nil{$ENDIF}); overload;
 
     function ToJSON(Compact: Boolean = True): string;
     {$IFNDEF NEXTGEN}
@@ -908,6 +924,13 @@ type
     procedure AcceptFailed(TokenKind: TJsonTokenKind);
   protected
     FLook: TJsonToken;
+    {$IFDEF SUPPORT_PROGRESS}
+    FLastProgressValue: NativeInt;
+    FStartP: Pointer;
+    FSize: NativeInt;
+    FProgress: PJsonReaderProgressRec;
+    procedure CheckProgress(Position: Pointer);
+    {$ENDIF SUPPORT_PROGRESS}
     function Next: Boolean; virtual; abstract;
   public
     {$IFDEF USE_FAST_NEWINSTANCE}
@@ -915,7 +938,7 @@ type
     procedure FreeInstance; override;
     {$ENDIF USE_FAST_NEWINSTANCE}
 
-    constructor Create;
+    constructor Create({$IFDEF SUPPORT_PROGRESS}AStartP: Pointer; ASize: NativeInt; AProgress: PJsonReaderProgressRec{$ENDIF});
     destructor Destroy; override;
     procedure Parse(Data: TJsonBaseObject);
   end;
@@ -932,7 +955,7 @@ type
     procedure LexNumber(P: PByte{$IFDEF CPUARM}; EndP: PByte{$ENDIF});
     procedure LexIdent(P: PByte{$IFDEF CPUARM}; EndP: PByte{$ENDIF});
   public
-    constructor Create(S: PByte; Len: Integer);
+    constructor Create(S: PByte; Len: NativeInt{$IFDEF SUPPORT_PROGRESS}; AProgress: PJsonReaderProgressRec{$ENDIF});
   end;
 
   TStringJsonReader = class sealed(TJsonReader)
@@ -947,7 +970,7 @@ type
     procedure LexNumber(P: PChar{$IFDEF CPUARM}; EndP: PChar{$ENDIF});
     procedure LexIdent(P: PChar{$IFDEF CPUARM}; EndP: PChar{$ENDIF});
   public
-    constructor Create(const S: PChar; Len: Integer);
+    constructor Create(const S: PChar; Len: Integer{$IFDEF SUPPORT_PROGRESS}; AProgress: PJsonReaderProgressRec{$ENDIF});
   end;
 
   TMemoryStreamAccess = class(TMemoryStream);
@@ -1387,6 +1410,18 @@ begin
     SetLength(S, OldLen);
 end;
 
+{$IFDEF SUPPORT_PROGRESS}
+{ TJsonReaderProgressRec }
+
+function TJsonReaderProgressRec.Init(AProgress: TJsonReaderProgressProc; AData: Pointer = nil; AThreshold: NativeInt = 0): PJsonReaderProgressRec;
+begin
+  Self.Data := AData;
+  Self.Threshold := AThreshold;
+  Self.Progress := AProgress;
+  Result := @Self;
+end;
+{$ENDIF SUPPORT_PROGRESS}
+
 { TJsonReader }
 
 {$IFDEF USE_FAST_NEWINSTANCE}
@@ -1406,7 +1441,7 @@ begin
 end;
 {$ENDIF ~USE_FAST_NEWINSTANCE}
 
-constructor TJsonReader.Create;
+constructor TJsonReader.Create({$IFDEF SUPPORT_PROGRESS}AStartP: Pointer; ASize: NativeInt; AProgress: PJsonReaderProgressRec{$ENDIF});
 begin
   //inherited Create;
   {$IFDEF USE_FAST_NEWINSTANCE}
@@ -1416,6 +1451,15 @@ begin
   {$IFDEF USE_STRINGINTERN_FOR_NAMES}
   FIdents.Init;
   {$ENDIF USE_STRINGINTERN_FOR_NAMES}
+
+  {$IFDEF SUPPORT_PROGRESS}
+  FStartP := AStartP;
+  FSize := ASize;
+  FProgress := AProgress;
+  FLastProgressValue := 0; // class is not zero-filled
+  if (FProgress <> nil) and Assigned(FProgress.Progress) then
+    FProgress.Progress(FProgress.Data, 0, 0, FSize);
+  {$ENDIF SUPPORT_PROGRESS}
 end;
 
 destructor TJsonReader.Destroy;
@@ -1427,8 +1471,46 @@ begin
   {$IFDEF USE_STRINGINTERN_FOR_NAMES}
   FIdents.Done;
   {$ENDIF USE_STRINGINTERN_FOR_NAMES}
+
+  {$IFDEF SUPPORT_PROGRESS}
+  if (FLook.Kind = jtkEof) and (FProgress <> nil) and Assigned(FProgress.Progress) then
+    FProgress.Progress(FProgress.Data, 100, FSize, FSize);
+  {$ENDIF SUPPORT_PROGRESS}
   //inherited Destroy;
 end;
+
+{$IFDEF SUPPORT_PROGRESS}
+procedure TJsonReader.CheckProgress(Position: Pointer);
+var
+  NewPercentage: NativeInt;
+  Ps: NativeInt;
+begin
+  if {(FProgress <> nil) and} Assigned(FProgress.Progress) then
+  begin
+    Ps := PByte(Position) - PByte(FStartP);
+    if FProgress.Threshold = 0 then
+    begin
+      NewPercentage := Ps * 100 div FSize;
+      if NewPercentage <> FLastProgressValue then
+      begin
+        FLastProgressValue := NewPercentage;
+        FProgress.Progress(FProgress.Data, NewPercentage, Ps, FSize);
+      end;
+    end
+    else if FProgress.Threshold > 0 then
+    begin
+      if Ps - FLastProgressValue >= FProgress.Threshold then
+      begin
+        FLastProgressValue := Ps;
+        NewPercentage := 0;
+        if FSize > 0 then
+          NewPercentage := Ps * 100 div FSize;
+        FProgress.Progress(FProgress.Data, NewPercentage, Ps, FSize);
+      end;
+    end;
+  end;
+end;
+{$ENDIF SUPPORT_PROGRESS}
 
 procedure TJsonReader.Parse(Data: TJsonBaseObject);
 begin
@@ -2630,18 +2712,18 @@ begin
 end;
 
 {$IFNDEF NEXTGEN}
-class function TJsonBaseObject.ParseUtf8(const S: UTF8String): TJsonBaseObject;
+class function TJsonBaseObject.ParseUtf8(const S: UTF8String{$IFDEF SUPPORT_PROGRESS}; AProgress: PJsonReaderProgressRec{$ENDIF}): TJsonBaseObject;
 begin
-  Result := ParseUtf8Bytes(PByte(S), Length(S));
+  Result := ParseUtf8Bytes(PByte(S), Length(S){$IFDEF SUPPORT_PROGRESS}, AProgress{$ENDIF});
 end;
 
-class function TJsonBaseObject.ParseUtf8(S: PAnsiChar; Len: Integer): TJsonBaseObject;
+class function TJsonBaseObject.ParseUtf8(S: PAnsiChar; Len: Integer{$IFDEF SUPPORT_PROGRESS}; AProgress: PJsonReaderProgressRec{$ENDIF}): TJsonBaseObject;
 begin
-  Result := ParseUtf8Bytes(PByte(S), Len);
+  Result := ParseUtf8Bytes(PByte(S), Len{$IFDEF SUPPORT_PROGRESS}, AProgress{$ENDIF});
 end;
 {$ENDIF ~NEXTGEN}
 
-class function TJsonBaseObject.ParseUtf8Bytes(S: PByte; Len: Integer): TJsonBaseObject;
+class function TJsonBaseObject.ParseUtf8Bytes(S: PByte; Len: Integer{$IFDEF SUPPORT_PROGRESS}; AProgress: PJsonReaderProgressRec{$ENDIF}): TJsonBaseObject;
 begin
   if (S = nil) or (Len = 0) then
     Result := nil
@@ -2670,10 +2752,10 @@ begin
         Result := TJsonObject.Create;
 
       {$IFDEF AUTOREFCOUNT}
-      Result.FromUtf8JSON(S, Len);
+      Result.FromUtf8JSON(S, Len{$IFDEF SUPPORT_PROGRESS}, AProgress{$ENDIF});
       {$ELSE}
       try
-        Result.FromUtf8JSON(S, Len);
+        Result.FromUtf8JSON(S, Len{$IFDEF SUPPORT_PROGRESS}, AProgress{$ENDIF});
       except
         Result.Free;
         raise;
@@ -2683,12 +2765,12 @@ begin
   end;
 end;
 
-class function TJsonBaseObject.Parse(const S: UnicodeString): TJsonBaseObject;
+class function TJsonBaseObject.Parse(const S: UnicodeString{$IFDEF SUPPORT_PROGRESS}; AProgress: PJsonReaderProgressRec{$ENDIF}): TJsonBaseObject;
 begin
-  Result := Parse(PWideChar(Pointer(S)), Length(S));
+  Result := Parse(PWideChar(Pointer(S)), Length(S){$IFDEF SUPPORT_PROGRESS}, AProgress{$ENDIF});
 end;
 
-class function TJsonBaseObject.Parse(S: PWideChar; Len: Integer): TJsonBaseObject;
+class function TJsonBaseObject.Parse(S: PWideChar; Len: Integer{$IFDEF SUPPORT_PROGRESS}; AProgress: PJsonReaderProgressRec{$ENDIF}): TJsonBaseObject;
 begin
   if (S = nil) or (Len = 0) then
     Result := nil
@@ -2711,10 +2793,10 @@ begin
         Result := TJsonObject.Create;
 
       {$IFDEF AUTOREFCOUNT}
-      Result.FromJSON(S, Len);
+      Result.FromJSON(S, Len{$IFDEF SUPPORT_PROGRESS}, AProgress{$ENDIF});
       {$ELSE}
       try
-        Result.FromJSON(S, Len);
+        Result.FromJSON(S, Len{$IFDEF SUPPORT_PROGRESS}, AProgress{$ENDIF});
       except
         Result.Free;
         raise;
@@ -2725,7 +2807,7 @@ begin
 end;
 
 class function TJsonBaseObject.Parse(const Bytes: TBytes; Encoding: TEncoding; ByteIndex: Integer;
-  ByteCount: Integer): TJsonBaseObject;
+  ByteCount: Integer{$IFDEF SUPPORT_PROGRESS}; AProgress: PJsonReaderProgressRec{$ENDIF}): TJsonBaseObject;
 var
   L: Integer;
 begin
@@ -2737,27 +2819,27 @@ begin
   else
   begin
     if (Encoding = TEncoding.UTF8) or (Encoding = nil) then
-      Result := ParseUtf8Bytes(PByte(@Bytes[ByteIndex]), ByteCount)
+      Result := ParseUtf8Bytes(PByte(@Bytes[ByteIndex]), ByteCount{$IFDEF SUPPORT_PROGRESS}, AProgress{$ENDIF})
     else if Encoding = TEncoding.Unicode then
-      Result := Parse(PWideChar(@Bytes[ByteIndex]), ByteCount div SizeOf(WideChar))
+      Result := Parse(PWideChar(@Bytes[ByteIndex]), ByteCount div SizeOf(WideChar){$IFDEF SUPPORT_PROGRESS}, AProgress{$ENDIF})
     else
-      Result := Parse(Encoding.GetString(Bytes, ByteIndex, ByteCount));
+      Result := Parse(Encoding.GetString(Bytes, ByteIndex, ByteCount){$IFDEF SUPPORT_PROGRESS}, AProgress{$ENDIF});
   end;
 end;
 
-class function TJsonBaseObject.ParseFromFile(const FileName: string; Utf8WithoutBOM: Boolean): TJsonBaseObject;
+class function TJsonBaseObject.ParseFromFile(const FileName: string; Utf8WithoutBOM: Boolean{$IFDEF SUPPORT_PROGRESS}; AProgress: PJsonReaderProgressRec{$ENDIF}): TJsonBaseObject;
 var
   Stream: TFileStream;
 begin
   Stream := TFileStream.Create(FileName, fmOpenRead or fmShareDenyWrite);
   try
-    Result := ParseFromStream(Stream, nil, Utf8WithoutBOM);
+    Result := ParseFromStream(Stream, nil, Utf8WithoutBOM{$IFDEF SUPPORT_PROGRESS}, AProgress{$ENDIF});
   finally
     Stream.Free;
   end;
 end;
 
-class function TJsonBaseObject.ParseFromStream(Stream: TStream; Encoding: TEncoding; Utf8WithoutBOM: Boolean): TJsonBaseObject;
+class function TJsonBaseObject.ParseFromStream(Stream: TStream; Encoding: TEncoding; Utf8WithoutBOM: Boolean{$IFDEF SUPPORT_PROGRESS}; AProgress: PJsonReaderProgressRec{$ENDIF}): TJsonBaseObject;
 var
   StreamInfo: TStreamInfo;
   S: string;
@@ -2766,9 +2848,9 @@ begin
   GetStreamBytes(Stream, Encoding, Utf8WithoutBOM, StreamInfo);
   try
     if Encoding = TEncoding.UTF8 then
-      Result := ParseUtf8Bytes(StreamInfo.Buffer, StreamInfo.Size)
+      Result := ParseUtf8Bytes(StreamInfo.Buffer, StreamInfo.Size{$IFDEF SUPPORT_PROGRESS}, AProgress{$ENDIF})
     else if Encoding = TEncoding.Unicode then
-      Result := Parse(PWideChar(Pointer(StreamInfo.Buffer)), StreamInfo.Size div SizeOf(WideChar))
+      Result := Parse(PWideChar(Pointer(StreamInfo.Buffer)), StreamInfo.Size div SizeOf(WideChar){$IFDEF SUPPORT_PROGRESS}, AProgress{$ENDIF})
     else
     begin
       L := TEncodingStrictAccess(Encoding).GetCharCountEx(StreamInfo.Buffer, StreamInfo.Size);
@@ -2782,7 +2864,7 @@ begin
       FreeMem(StreamInfo.AllocationBase);
       StreamInfo.AllocationBase := nil;
 
-      Result := Parse(S);
+      Result := Parse(S{$IFDEF SUPPORT_PROGRESS}, AProgress{$ENDIF});
     end;
   finally
     FreeMem(StreamInfo.AllocationBase);
@@ -2790,18 +2872,18 @@ begin
 end;
 
 {$IFNDEF NEXTGEN}
-procedure TJsonBaseObject.FromUtf8JSON(const S: UTF8String);
+procedure TJsonBaseObject.FromUtf8JSON(const S: UTF8String{$IFDEF SUPPORT_PROGRESS}; AProgress: PJsonReaderProgressRec{$ENDIF});
 begin
-  FromUtf8JSON(PAnsiChar(Pointer(S)), Length(S));
+  FromUtf8JSON(PAnsiChar(Pointer(S)), Length(S){$IFDEF SUPPORT_PROGRESS}, AProgress{$ENDIF});
 end;
 
-procedure TJsonBaseObject.FromUtf8JSON(S: PAnsiChar; Len: Integer);
+procedure TJsonBaseObject.FromUtf8JSON(S: PAnsiChar; Len: Integer{$IFDEF SUPPORT_PROGRESS}; AProgress: PJsonReaderProgressRec{$ENDIF});
 begin
-  FromUtf8JSON(PByte(S), Len);
+  FromUtf8JSON(PByte(S), Len{$IFDEF SUPPORT_PROGRESS}, AProgress{$ENDIF});
 end;
 {$ENDIF ~NEXTGEN}
 
-procedure TJsonBaseObject.FromUtf8JSON(S: PByte; Len: Integer);
+procedure TJsonBaseObject.FromUtf8JSON(S: PByte; Len: Integer{$IFDEF SUPPORT_PROGRESS}; AProgress: PJsonReaderProgressRec{$ENDIF});
 var
   Reader: TJsonReader;
 begin
@@ -2813,7 +2895,7 @@ begin
     Len := StrLen(PAnsiChar(S));
     {$ENDIF ~NEXTGEN}
   end;
-  Reader := TUtf8JsonReader.Create(S, Len);
+  Reader := TUtf8JsonReader.Create(S, Len{$IFDEF SUPPORT_PROGRESS}, AProgress{$ENDIF});
   try
     Reader.Parse(Self);
   finally
@@ -2821,18 +2903,18 @@ begin
   end;
 end;
 
-procedure TJsonBaseObject.FromJSON(const S: UnicodeString);
+procedure TJsonBaseObject.FromJSON(const S: UnicodeString{$IFDEF SUPPORT_PROGRESS}; AProgress: PJsonReaderProgressRec{$ENDIF});
 begin
-  FromJSON(PWideChar(S), Length(S));
+  FromJSON(PWideChar(S), Length(S){$IFDEF SUPPORT_PROGRESS}, AProgress{$ENDIF});
 end;
 
-procedure TJsonBaseObject.FromJSON(S: PWideChar; Len: Integer = -1);
+procedure TJsonBaseObject.FromJSON(S: PWideChar; Len: Integer{$IFDEF SUPPORT_PROGRESS}; AProgress: PJsonReaderProgressRec{$ENDIF});
 var
   Reader: TJsonReader;
 begin
   if Len < 0 then
     Len := StrLen(S);
-  Reader := TStringJsonReader.Create(S, Len);
+  Reader := TStringJsonReader.Create(S, Len{$IFDEF SUPPORT_PROGRESS}, AProgress{$ENDIF});
   try
     Reader.Parse(Self);
   finally
@@ -2840,13 +2922,13 @@ begin
   end;
 end;
 
-procedure TJsonBaseObject.LoadFromFile(const FileName: string; Utf8WithoutBOM: Boolean);
+procedure TJsonBaseObject.LoadFromFile(const FileName: string; Utf8WithoutBOM: Boolean{$IFDEF SUPPORT_PROGRESS}; AProgress: PJsonReaderProgressRec{$ENDIF});
 var
   Stream: TFileStream;
 begin
   Stream := TFileStream.Create(FileName, fmOpenRead or fmShareDenyWrite);
   try
-    LoadFromStream(Stream, nil, Utf8WithoutBOM);
+    LoadFromStream(Stream, nil, Utf8WithoutBOM{$IFDEF SUPPORT_PROGRESS}, AProgress{$ENDIF});
   finally
     Stream.Free;
   end;
@@ -2964,7 +3046,7 @@ begin
   end;
 end;
 
-procedure TJsonBaseObject.LoadFromStream(Stream: TStream; Encoding: TEncoding; Utf8WithoutBOM: Boolean);
+procedure TJsonBaseObject.LoadFromStream(Stream: TStream; Encoding: TEncoding; Utf8WithoutBOM: Boolean{$IFDEF SUPPORT_PROGRESS}; AProgress: PJsonReaderProgressRec{$ENDIF});
 var
   StreamInfo: TStreamInfo;
   S: string;
@@ -2973,9 +3055,9 @@ begin
   GetStreamBytes(Stream, Encoding, Utf8WithoutBOM, StreamInfo);
   try
     if Encoding = TEncoding.UTF8 then
-      FromUtf8JSON(StreamInfo.Buffer, StreamInfo.Size)
+      FromUtf8JSON(StreamInfo.Buffer, StreamInfo.Size{$IFDEF SUPPORT_PROGRESS}, AProgress{$ENDIF})
     else if Encoding = TEncoding.Unicode then
-      FromJSON(PWideChar(Pointer(StreamInfo.Buffer)), StreamInfo.Size div SizeOf(WideChar))
+      FromJSON(PWideChar(Pointer(StreamInfo.Buffer)), StreamInfo.Size div SizeOf(WideChar){$IFDEF SUPPORT_PROGRESS}, AProgress{$ENDIF})
     else
     begin
       L := TEncodingStrictAccess(Encoding).GetCharCountEx(StreamInfo.Buffer, StreamInfo.Size);
@@ -2989,7 +3071,7 @@ begin
       FreeMem(StreamInfo.AllocationBase);
       StreamInfo.AllocationBase := nil;
 
-      FromJSON(S);
+      FromJSON(S{$IFDEF SUPPORT_PROGRESS}, AProgress{$ENDIF});
     end;
   finally
     FreeMem(StreamInfo.AllocationBase);
@@ -5309,9 +5391,9 @@ end;
 
 { TUtf8JsonReader }
 
-constructor TUtf8JsonReader.Create(S: PByte; Len: Integer);
+constructor TUtf8JsonReader.Create(S: PByte; Len: NativeInt{$IFDEF SUPPORT_PROGRESS}; AProgress: PJsonReaderProgressRec{$ENDIF});
 begin
-  inherited Create;
+  inherited Create({$IFDEF SUPPORT_PROGRESS}PByte(S), Len * SizeOf(Byte), AProgress{$ENDIF});
   FText := S;
   FTextEnd := S + Len;
 end;
@@ -5359,11 +5441,27 @@ begin
           FText := P + 1;
         end;
       Ord('"'): // String
-        LexString(P{$IFDEF CPUARM}, EndP{$ENDIF});
+        begin
+          LexString(P{$IFDEF CPUARM}, EndP{$ENDIF});
+          {$IFDEF SUPPORT_PROGRESS}
+          if FProgress <> nil then
+            CheckProgress(FText);
+          {$ENDIF SUPPORT_PROGRESS}
+        end;
       Ord('-'), Ord('0')..Ord('9'), Ord('.'): // Number
-        LexNumber(P{$IFDEF CPUARM}, EndP{$ENDIF});
+        begin
+          LexNumber(P{$IFDEF CPUARM}, EndP{$ENDIF});
+          {$IFDEF SUPPORT_PROGRESS}
+          if FProgress <> nil then
+            CheckProgress(FText);
+          {$ENDIF SUPPORT_PROGRESS}
+        end
     else
       LexIdent(P{$IFDEF CPUARM}, EndP{$ENDIF}); // Ident/Bool/NULL
+      {$IFDEF SUPPORT_PROGRESS}
+      if FProgress <> nil then
+        CheckProgress(FText);
+      {$ENDIF SUPPORT_PROGRESS}
     end;
     Result := True;
   end
@@ -5797,9 +5895,9 @@ end;
 
 { TStringJsonReader }
 
-constructor TStringJsonReader.Create(const S: PChar; Len: Integer);
+constructor TStringJsonReader.Create(const S: PChar; Len: Integer{$IFDEF SUPPORT_PROGRESS}; AProgress: PJsonReaderProgressRec{$ENDIF});
 begin
-  inherited Create;
+  inherited Create({$IFDEF SUPPORT_PROGRESS}S, Len * SizeOf(WideChar), AProgress{$ENDIF});
   FText := S;
   FTextEnd := S + Len;
 end;
@@ -5847,11 +5945,27 @@ begin
           FText := P + 1;
         end;
       '"': // String
-        LexString(P{$IFDEF CPUARM}, EndP{$ENDIF});
+        begin
+          LexString(P{$IFDEF CPUARM}, EndP{$ENDIF});
+          {$IFDEF SUPPORT_PROGRESS}
+          if FProgress <> nil then
+            CheckProgress(FText);
+          {$ENDIF SUPPORT_PROGRESS}
+        end;
       '-', '0'..'9', '.': // Number
-        LexNumber(P{$IFDEF CPUARM}, EndP{$ENDIF});
+        begin
+          LexNumber(P{$IFDEF CPUARM}, EndP{$ENDIF});
+          {$IFDEF SUPPORT_PROGRESS}
+          if FProgress <> nil then
+            CheckProgress(FText);
+          {$ENDIF SUPPORT_PROGRESS}
+        end
     else
       LexIdent(P{$IFDEF CPUARM}, EndP{$ENDIF}); // Ident/Bool/NULL
+      {$IFDEF SUPPORT_PROGRESS}
+      if FProgress <> nil then
+        CheckProgress(FText);
+      {$ENDIF SUPPORT_PROGRESS}
     end;
     Result := True;
   end
