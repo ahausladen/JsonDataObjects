@@ -55,6 +55,7 @@ type
     procedure TestInt64MaxIntX2;
     procedure TestVariant;
     procedure TestVariantNull;
+    procedure TestUInt64;
   end;
 
   TestTJsonArray = class(TTestCase)
@@ -1491,6 +1492,21 @@ begin
   end;
 end;
 
+procedure TestTJsonBaseObject.TestUInt64;
+var
+  S1, S2: string;
+  Json: TJsonObject;
+begin
+  S1 := '{"long_val":15744383709429629494,"long_str":"15744383709429629494"}';
+  Json := TJsonObject.Parse(S1) as TJsonObject;
+  try
+    S2 := Json.ToJSON;
+    CheckEquals(S2, S1);
+  finally
+    Json.Free;
+  end;
+end;
+
 { TestTJsonArray }
 
 procedure TestTJsonArray.SetUp;
@@ -1629,6 +1645,11 @@ begin
     CheckEquals(20, A.Count);
     Check(A.Types[19] = jdtObject, 'jdtObject');
     CheckNull(A.O[19]);
+
+    A.Add(12345678901234567890);
+    CheckEquals(21, A.Count);
+    Check(A.Types[20] = jdtULong, 'jdtULong');
+    CheckEquals(12345678901234567890, A.U[20]);
   finally
     A.Free;
   end;
@@ -1655,7 +1676,17 @@ begin
     CheckEquals(5, A.Count);
     CheckEqualsString('ZZZ', A.S[4]);
 
-    CheckEquals('["AAA",1,"Key",2,"ZZZ"]', A.ToJSON);
+    A.Insert(0, 12345678901234567890);
+    CheckEquals(6, A.Count);
+    Check(A.Types[0] = jdtULong, 'jdtULong');
+    CheckEquals(12345678901234567890, A.U[0]);
+
+    A.Insert(0, -1234567890123456789);
+    CheckEquals(7, A.Count);
+    Check(A.Types[0] = jdtLong, 'jdtLong');
+    CheckEquals(-1234567890123456789, A.L[0]);
+
+    CheckEquals('[-1234567890123456789,12345678901234567890,"AAA",1,"Key",2,"ZZZ"]', A.ToJSON);
   finally
     A.Free;
   end;
@@ -1694,11 +1725,6 @@ begin
 end;
 
 procedure TestTJsonArray.TestEnumerator;
-const
-  //TODO DRY: extract DataTypeNames from TJsonDataValue.TypeCastError
-  DataTypeNames: array[TJsonDataType] of string = (
-    'null', 'String', 'Integer', 'Long', 'Float', 'DateTime', 'Bool', 'Array', 'Object'
-  );
 var
   A: TJsonArray;
   Value: TJsonDataValueHelper;
@@ -1710,7 +1736,7 @@ begin
     for Typ in [Low(TJsonDataType)..High(TJsonDataType)] do
       FoundTypes[Typ] := False;
 
-    A.FromJSON('[ 42, { "Key": "Value" }, true, null, 1234567890123456789, 1.12, "String", [ 1, 2, 3 ] ]');
+    A.FromJSON('[ 42, { "Key": "Value" }, true, null, 1234567890123456789, 12345678901234567890, 1.12, "String", [ 1, 2, 3 ] ]');
 
     // did this here because right now we can't auto parse datetime values
     A.Add(TJsonBaseObject.JSONToDateTime('2014-12-31T23:59:59.999Z'));
@@ -1727,6 +1753,7 @@ begin
         jdtString:  CheckEquals('String', Value, 'String value');
         jdtInt:     CheckEquals(42, Value, 'Int value');
         jdtLong:    CheckEquals(1234567890123456789, Value, 'Long value');
+        jdtULong:   CheckEquals(12345678901234567890, Value.ULongValue, 'ULong value');
         jdtFloat:   CheckEquals(1.12, Value, 0.001, 'Float value');
         jdtDateTime:CheckEquals(TJsonBaseObject.JSONToDateTime('2014-12-31T23:59:59.999Z'), TDateTime(Value), 0.001, 'DateTime value');        // may be we need to add extended vartype overload?
         jdtBool:    CheckEquals(True, Value, 'Boolean value');
@@ -1736,7 +1763,7 @@ begin
     end;
 
     for Typ in [Low(TJsonDataType)..High(TJsonDataType)] do
-      CheckTrue(FoundTypes[Typ], DataTypeNames[Typ]);
+      CheckTrue(FoundTypes[Typ], TJsonBaseObject.DataTypeNames[Typ]);
   finally
     A.Free;
   end;
@@ -2311,11 +2338,6 @@ begin
 end;
 
 procedure TestTJsonObject.TestEnumerator;
-const
-  //TODO DRY: extract DataTypeNames from TJsonDataValue.TypeCastError
-  DataTypeNames: array[TJsonDataType] of string = (
-    'null', 'String', 'Integer', 'Long', 'Float', 'DateTime', 'Bool', 'Array', 'Object'
-  );
 var
   Obj: TJsonObject;
   Pair: TJsonNameValuePair;
@@ -2330,7 +2352,8 @@ begin
     FoundTypes[jdtDateTime] := True;
 
     Obj.FromJSON('{ "Int": 42, "Object": { "Key": "Value" }, "Bool": true, "Null": null, ' +
-                   '"Long": 1234567890123456789, "Float": 1.12, "String": "Hello world!", "Array": [ 1, 2, 3 ] }');
+                   '"Long": 1234567890123456789, "ULong": 12345678901234567890, "Float": 1.12, ' +
+                   '"String": "Hello world!", "Array": [ 1, 2, 3 ] }');
 
     // did this here because right now we can't auto parse datetime values
     Obj.D['DateTime'] := TJsonBaseObject.JSONToDateTime('2014-12-31T23:59:59.999Z');
@@ -2360,6 +2383,12 @@ begin
           begin
             CheckEquals('Long', Pair.Name, 'Long name');
             CheckEquals(1234567890123456789, Pair.Value, 'Long value');
+          end;
+
+        jdtULong:
+          begin
+            CheckEquals('ULong', Pair.Name, 'ULong name');
+            CheckEquals(12345678901234567890, Pair.Value.ULongValue, 'ULong value');
           end;
 
         jdtFloat:
@@ -2395,7 +2424,7 @@ begin
     end;
 
     for Typ in [Low(TJsonDataType)..High(TJsonDataType)] do
-      CheckTrue(FoundTypes[Typ], DataTypeNames[Typ]);
+      CheckTrue(FoundTypes[Typ], TJsonBaseObject.DataTypeNames[Typ]);
   finally
     Obj.Free;
   end;

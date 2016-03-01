@@ -1,7 +1,7 @@
 (*****************************************************************************
 The MIT License (MIT)
 
-Copyright (c) 2015 Andreas Hausladen
+Copyright (c) 2015-2016 Andreas Hausladen
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -195,7 +195,7 @@ type
   end;
 
   TJsonDataType = (
-    jdtNone, jdtString, jdtInt, jdtLong, jdtFloat, jdtDateTime, jdtBool, jdtArray, jdtObject
+    jdtNone, jdtString, jdtInt, jdtLong, jdtULong, jdtFloat, jdtDateTime, jdtBool, jdtArray, jdtObject
   );
 
   // TJsonDataValue holds the actual value
@@ -210,6 +210,7 @@ type
                                  // it up, anyway.
         jdtInt: (I: Integer);
         jdtLong: (L: Int64);
+        jdtULong: (U: UInt64);
         jdtFloat: (F: Double);
         jdtDateTime: (D: TDateTime);
         jdtBool: (B: Boolean);
@@ -222,6 +223,7 @@ type
     function GetValue: string;
     function GetIntValue: Integer;
     function GetLongValue: Int64;
+    function GetULongValue: UInt64;
     function GetFloatValue: Double;
     function GetDateTimeValue: TDateTime;
     function GetBoolValue: Boolean;
@@ -232,6 +234,7 @@ type
     procedure SetValue(const AValue: string);
     procedure SetIntValue(const AValue: Integer);
     procedure SetLongValue(const AValue: Int64);
+    procedure SetULongValue(const AValue: UInt64);
     procedure SetFloatValue(const AValue: Double);
     procedure SetDateTimeValue(const AValue: TDateTime);
     procedure SetBoolValue(const AValue: Boolean);
@@ -251,6 +254,7 @@ type
     property Value: string read GetValue write SetValue;
     property IntValue: Integer read GetIntValue write SetIntValue;
     property LongValue: Int64 read GetLongValue write SetLongValue;
+    property ULongValue: UInt64 read GetULongValue write SetULongValue;
     property FloatValue: Double read GetFloatValue write SetFloatValue;
     property DateTimeValue: TDateTime read GetDateTimeValue write SetDateTimeValue;
     property BoolValue: Boolean read GetBoolValue write SetBoolValue;
@@ -266,6 +270,7 @@ type
     function GetValue: string; inline;
     function GetIntValue: Integer; inline;
     function GetLongValue: Int64; inline;
+    function GetULongValue: UInt64; //inline;  no implicit operator due to conflict with Int64
     function GetFloatValue: Double; inline;
     function GetDateTimeValue: TDateTime; inline;
     function GetBoolValue: Boolean; inline;
@@ -276,6 +281,7 @@ type
     procedure SetValue(const Value: string);
     procedure SetIntValue(const Value: Integer);
     procedure SetLongValue(const Value: Int64);
+    procedure SetULongValue(const Value: UInt64);
     procedure SetFloatValue(const Value: Double);
     procedure SetDateTimeValue(const Value: TDateTime);
     procedure SetBoolValue(const Value: Boolean);
@@ -289,6 +295,7 @@ type
     function GetObjectString(const Name: string): string; inline;
     function GetObjectInt(const Name: string): Integer; inline;
     function GetObjectLong(const Name: string): Int64; inline;
+    function GetObjectULong(const Name: string): UInt64; inline;
     function GetObjectFloat(const Name: string): Double; inline;
     function GetObjectDateTime(const Name: string): TDateTime; inline;
     function GetObjectBool(const Name: string): Boolean; inline;
@@ -298,6 +305,7 @@ type
     procedure SetObjectString(const Name, Value: string); inline;
     procedure SetObjectInt(const Name: string; const Value: Integer); inline;
     procedure SetObjectLong(const Name: string; const Value: Int64); inline;
+    procedure SetObjectULong(const Name: string; const Value: UInt64); inline;
     procedure SetObjectFloat(const Name: string; const Value: Double); inline;
     procedure SetObjectDateTime(const Name: string; const Value: TDateTime); inline;
     procedure SetObjectBool(const Name: string; const Value: Boolean); inline;
@@ -318,6 +326,8 @@ type
     class operator Implicit(const Value: TJsonDataValueHelper): Integer; overload;
     class operator Implicit(const Value: Int64): TJsonDataValueHelper; overload;
     class operator Implicit(const Value: TJsonDataValueHelper): Int64; overload;
+    //class operator Implicit(const Value: UInt64): TJsonDataValueHelper; overload;  conflicts with Int64 operator
+    //class operator Implicit(const Value: TJsonDataValueHelper): UInt64; overload;  conflicts with Int64 operator
     class operator Implicit(const Value: Double): TJsonDataValueHelper; overload;
     class operator Implicit(const Value: TJsonDataValueHelper): Double; overload;
     class operator Implicit(const Value: Extended): TJsonDataValueHelper; overload;
@@ -338,6 +348,7 @@ type
     property Value: string read GetValue write SetValue;
     property IntValue: Integer read GetIntValue write SetIntValue;
     property LongValue: Int64 read GetLongValue write SetLongValue;
+    property ULongValue: UInt64 read GetULongValue write SetULongValue;
     property FloatValue: Double read GetFloatValue write SetFloatValue;
     property DateTimeValue: TDateTime read GetDateTimeValue write SetDateTimeValue;
     property BoolValue: Boolean read GetBoolValue write SetBoolValue;
@@ -351,11 +362,12 @@ type
     property Items[Index: Integer]: TJsonDataValueHelper read GetArrayItem;
 
     property S[const Name: string]: string read GetObjectString write SetObjectString;        // returns '' if property doesn't exist, auto type-cast except for array/object
-    property I[const Name: string]: Integer read GetObjectInt write SetObjectInt;             // return 0 if property doesn't exist, auto type-cast except for array/object
-    property L[const Name: string]: Int64 read GetObjectLong write SetObjectLong;             // return 0 if property doesn't exist, auto type-cast except for array/object
-    property F[const Name: string]: Double read GetObjectFloat write SetObjectFloat;          // return 0 if property doesn't exist, auto type-cast except for array/object
-    property D[const Name: string]: TDateTime read GetObjectDateTime write SetObjectDateTime; // return 0 if property doesn't exist, auto type-cast except for array/object
-    property B[const Name: string]: Boolean read GetObjectBool write SetObjectBool;           // return false if property doesn't exist, auto type-cast with "<>'true'" and "<>0" except for array/object
+    property I[const Name: string]: Integer read GetObjectInt write SetObjectInt;             // returns 0 if property doesn't exist, auto type-cast except for array/object
+    property L[const Name: string]: Int64 read GetObjectLong write SetObjectLong;             // returns 0 if property doesn't exist, auto type-cast except for array/object
+    property U[const Name: string]: UInt64 read GetObjectULong write SetObjectULong;          // returns 0 if property doesn't exist, auto type-cast except for array/object
+    property F[const Name: string]: Double read GetObjectFloat write SetObjectFloat;          // returns 0 if property doesn't exist, auto type-cast except for array/object
+    property D[const Name: string]: TDateTime read GetObjectDateTime write SetObjectDateTime; // returns 0 if property doesn't exist, auto type-cast except for array/object
+    property B[const Name: string]: Boolean read GetObjectBool write SetObjectBool;           // returns false if property doesn't exist, auto type-cast with "<>'true'" and "<>0" except for array/object
     // Used to auto create arrays
     property A[const Name: string]: TJsonArray read GetArray write SetArray;
     // Used to auto create objects and as default property where no Implicit operator matches
@@ -375,6 +387,7 @@ type
       case FTyp: TJsonDataType of
         jdtInt: (FIntValue: Integer);
         jdtLong: (FLongValue: Int64);
+        jdtULong: (FULongValue: UInt64);
         jdtFloat: (FFloatValue: Double);
         jdtDateTime: (FDateTimeValue: TDateTime);
         jdtBool: (FBoolValue: Boolean);
@@ -413,6 +426,10 @@ type
     class procedure JSONStrToStr(P, EndP: PChar; FirstEscapeIndex: Integer; var S: string); static;
     class procedure JSONUtf8StrToStr(P, EndP: PByte; FirstEscapeIndex: Integer; var S: string); static;
   public
+    const DataTypeNames: array[TJsonDataType] of string = (
+      'null', 'String', 'Integer', 'Long', 'ULong', 'Float', 'DateTime', 'Bool', 'Array', 'Object'
+    );
+
     {$IFDEF USE_FAST_NEWINSTANCE}
     class function NewInstance: TObject {$IFDEF AUTOREFCOUNT} unsafe {$ENDIF}; override;
     {$ENDIF USE_FAST_NEWINSTANCE}
@@ -484,6 +501,7 @@ type
     function GetString(Index: Integer): string; inline;
     function GetInt(Index: Integer): Integer; inline;
     function GetLong(Index: Integer): Int64; inline;
+    function GetULong(Index: Integer): UInt64; inline;
     function GetFloat(Index: Integer): Double; inline;
     function GetDateTime(Index: Integer): TDateTime; inline;
     function GetBool(Index: Integer): Boolean; inline;
@@ -494,6 +512,7 @@ type
     procedure SetString(Index: Integer; const Value: string); inline;
     procedure SetInt(Index: Integer; const Value: Integer); inline;
     procedure SetLong(Index: Integer; const Value: Int64); inline;
+    procedure SetULong(Index: Integer; const Value: UInt64); inline;
     procedure SetFloat(Index: Integer; const Value: Double); inline;
     procedure SetDateTime(Index: Integer; const Value: TDateTime); inline;
     procedure SetBool(Index: Integer; const Value: Boolean); inline;
@@ -528,11 +547,12 @@ type
     procedure Assign(ASource: TJsonArray);
 
     procedure Add(const AValue: string); overload;
-    procedure Add(AValue: Integer); overload;
-    procedure Add(AValue: Int64); overload;
-    procedure Add(AValue: Double); overload;
-    procedure Add(AValue: TDateTime); overload;
-    procedure Add(AValue: Boolean); overload;
+    procedure Add(const AValue: Integer); overload;
+    procedure Add(const AValue: Int64); overload;
+    procedure Add(const AValue: UInt64); overload;
+    procedure Add(const AValue: Double); overload;
+    procedure Add(const AValue: TDateTime); overload;
+    procedure Add(const AValue: Boolean); overload;
     procedure Add(const AValue: TJsonArray); overload;
     procedure Add(const AValue: TJsonObject); overload;
     procedure Add(const AValue: Variant); overload;
@@ -541,11 +561,12 @@ type
     procedure AddObject(const Value: TJsonObject); overload; inline; // makes it easier to add "null"
 
     procedure Insert(Index: Integer; const AValue: string); overload;
-    procedure Insert(Index: Integer; AValue: Integer); overload;
-    procedure Insert(Index: Integer; AValue: Int64); overload;
-    procedure Insert(Index: Integer; AValue: Double); overload;
-    procedure Insert(Index: Integer; AValue: TDateTime); overload;
-    procedure Insert(Index: Integer; AValue: Boolean); overload;
+    procedure Insert(Index: Integer; const AValue: Integer); overload;
+    procedure Insert(Index: Integer; const AValue: Int64); overload;
+    procedure Insert(Index: Integer; const AValue: UInt64); overload;
+    procedure Insert(Index: Integer; const AValue: Double); overload;
+    procedure Insert(Index: Integer; const AValue: TDateTime); overload;
+    procedure Insert(Index: Integer; const AValue: Boolean); overload;
     procedure Insert(Index: Integer; const AValue: TJsonArray); overload;
     procedure Insert(Index: Integer; const AValue: TJsonObject); overload;
     procedure Insert(Index: Integer; const AValue: Variant); overload;
@@ -562,6 +583,7 @@ type
     property S[Index: Integer]: string read GetString write SetString;
     property I[Index: Integer]: Integer read GetInt write SetInt;
     property L[Index: Integer]: Int64 read GetLong write SetLong;
+    property U[Index: Integer]: UInt64 read GetULong write SetULong;
     property F[Index: Integer]: Double read GetFloat write SetFloat;
     property D[Index: Integer]: TDateTime read GetDateTime write SetDateTime;
     property B[Index: Integer]: Boolean read GetBool write SetBool;
@@ -608,23 +630,27 @@ type
     {$ENDIF USE_LAST_NAME_STRING_LITERAL_CACHE}
     function FindItem(const Name: string; var Item: PJsonDataValue): Boolean;
     function RequireItem(const Name: string): PJsonDataValue;
-    function GetArray(const Name: string): TJsonArray;
+
+    function GetString(const Name: string): string;
     function GetBool(const Name: string): Boolean;
     function GetInt(const Name: string): Integer;
+    function GetLong(const Name: string): Int64;
+    function GetULong(const Name: string): UInt64;
+    function GetFloat(const Name: string): Double;
+    function GetDateTime(const Name: string): TDateTime;
     function GetObject(const Name: string): TJsonObject;
-    function GetString(const Name: string): string;
-    procedure SetArray(const Name: string; const Value: TJsonArray);
+    function GetArray(const Name: string): TJsonArray;
+    procedure SetString(const Name, Value: string);
     procedure SetBool(const Name: string; const Value: Boolean);
     procedure SetInt(const Name: string; const Value: Integer);
-    procedure SetObject(const Name: string; const Value: TJsonObject);
-    procedure SetString(const Name, Value: string);
-    function GetType(const Name: string): TJsonDataType;
-    function GetFloat(const Name: string): Double;
-    procedure SetFloat(const Name: string; const Value: Double);
-    function GetDateTime(const Name: string): TDateTime;
-    procedure SetDateTime(const Name: string; const Value: TDateTime);
-    function GetLong(const Name: string): Int64;
     procedure SetLong(const Name: string; const Value: Int64);
+    procedure SetULong(const Name: string; const Value: UInt64);
+    procedure SetFloat(const Name: string; const Value: Double);
+    procedure SetDateTime(const Name: string; const Value: TDateTime);
+    procedure SetObject(const Name: string; const Value: TJsonObject);
+    procedure SetArray(const Name: string; const Value: TJsonArray);
+
+    function GetType(const Name: string): TJsonDataType;
     function GetName(Index: Integer): string; inline;
     function GetItem(Index: Integer): PJsonDataValue; inline;
     procedure SetValue(const Name: string; const Value: TJsonDataValueHelper);
@@ -632,11 +658,12 @@ type
 
     { Used from the reader, never every use them outside the reader, they may crash your strings }
     procedure InternAdd(var AName: string; const AValue: string); overload;
-    procedure InternAdd(var AName: string; AValue: Integer); overload;
-    procedure InternAdd(var AName: string; AValue: Int64); overload;
-    procedure InternAdd(var AName: string; AValue: Double); overload;
-    procedure InternAdd(var AName: string; AValue: TDateTime); overload;
-    procedure InternAdd(var AName: string; AValue: Boolean); overload;
+    procedure InternAdd(var AName: string; const AValue: Integer); overload;
+    procedure InternAdd(var AName: string; const AValue: Int64); overload;
+    procedure InternAdd(var AName: string; const AValue: UInt64); overload;
+    procedure InternAdd(var AName: string; const AValue: Double); overload;
+    procedure InternAdd(var AName: string; const AValue: TDateTime); overload;
+    procedure InternAdd(var AName: string; const AValue: Boolean); overload;
     procedure InternAdd(var AName: string; const AValue: TJsonArray); overload;
     procedure InternAdd(var AName: string; const AValue: TJsonObject); overload;
     function InternAddArray(var AName: string): TJsonArray;
@@ -686,11 +713,12 @@ type
 
     // Short names
     property S[const Name: string]: string read GetString write SetString;        // returns '' if property doesn't exist, auto type-cast except for array/object
-    property I[const Name: string]: Integer read GetInt write SetInt;             // return 0 if property doesn't exist, auto type-cast except for array/object
-    property L[const Name: string]: Int64 read GetLong write SetLong;             // return 0 if property doesn't exist, auto type-cast except for array/object
-    property F[const Name: string]: Double read GetFloat write SetFloat;          // return 0 if property doesn't exist, auto type-cast except for array/object
-    property D[const Name: string]: TDateTime read GetDateTime write SetDateTime; // return 0 if property doesn't exist, auto type-cast except for array/object
-    property B[const Name: string]: Boolean read GetBool write SetBool;           // return false if property doesn't exist, auto type-cast with "<>'true'" and "<>0" except for array/object
+    property I[const Name: string]: Integer read GetInt write SetInt;             // returns 0 if property doesn't exist, auto type-cast except for array/object
+    property L[const Name: string]: Int64 read GetLong write SetLong;             // returns 0 if property doesn't exist, auto type-cast except for array/object
+    property U[const Name: string]: UInt64 read GetULong write SetULong;          // returns 0 if property doesn't exist, auto type-cast except for array/object
+    property F[const Name: string]: Double read GetFloat write SetFloat;          // returns 0 if property doesn't exist, auto type-cast except for array/object
+    property D[const Name: string]: TDateTime read GetDateTime write SetDateTime; // returns 0 if property doesn't exist, auto type-cast except for array/object
+    property B[const Name: string]: Boolean read GetBool write SetBool;           // returns false if property doesn't exist, auto type-cast with "<>'true'" and "<>0" except for array/object
     property A[const Name: string]: TJsonArray read GetArray write SetArray;      // auto creates array on first access
     property O[const Name: string]: TJsonObject read GetObject write SetObject;   // auto creates object on first access
 
@@ -709,6 +737,11 @@ type
     UseUtcTime: Boolean;
     NullConvertsToValueTypes: Boolean;
   end;
+
+  // Rename classes because RTL classes have the same name
+  TJDOJsonBaseObject = TJsonBaseObject;
+  TJDOJsonObject = TJsonObject;
+  TJDOJsonArray = TJsonArray;
 
 var
   JsonSerializationConfig: TJsonSerializationConfig = ( // not thread-safe
@@ -769,7 +802,7 @@ type
     jtkEof, jtkInvalidSymbol,
     jtkLBrace, jtkRBrace, jtkLBracket, jtkRBracket, jtkComma, jtkColon,
     jtkIdent,
-    jtkValue, jtkString, jtkInt, jtkLong, jtkFloat, jtkTrue, jtkFalse, jtkNull
+    jtkValue, jtkString, jtkInt, jtkLong, jtkULong, jtkFloat, jtkTrue, jtkFalse, jtkNull
   );
 
 const
@@ -777,7 +810,7 @@ const
     'end of file', 'invalid symbol',
     '"{"', '"}"', '"["', '"]"', '","', '":"',
     'identifier',
-    'value', 'value', 'value', 'value', 'value', 'value', 'value', 'value'
+    'value', 'value', 'value', 'value', 'value', 'value', 'value', 'value', 'value'
   );
 
   Power10: array[0..18] of Double = (
@@ -856,7 +889,8 @@ type
     case Integer of
       0: (I: Integer; HI: Integer);
       1: (L: Int64);
-      2: (F: Double);
+      2: (U: UInt64);
+      3: (F: Double);
   end;
 
   TJsonReader = class(TObject)
@@ -1185,8 +1219,10 @@ begin
       Result := jdtString;
     varSmallInt, varInteger, varShortInt, varByte, varWord, varLongWord:
       Result := jdtInt;
-    varInt64, varUInt64:
+    varInt64:
       Result := jdtLong;
+    varUInt64:
+      Result := jdtULong;
     varSingle, varDouble, varCurrency:
       Result := jdtFloat;
     varDate:
@@ -1507,6 +1543,12 @@ begin
         Next;
       end;
 
+    jtkULong:
+      begin
+        Data.InternAdd(FPropName, FLook.U);
+        Next;
+      end;
+
     jtkFloat:
       begin
         Data.InternAdd(FPropName, FLook.F);
@@ -1587,6 +1629,12 @@ begin
         Next;
       end;
 
+    jtkULong:
+      begin
+        Data.Add(FLook.U);
+        Next;
+      end;
+
     jtkFloat:
       begin
         Data.Add(FLook.F);
@@ -1639,6 +1687,8 @@ begin
       FValue.I := 0;
     jdtLong:
       FValue.L := 0;
+    jdtULong:
+      FValue.U := 0;
     jdtFloat:
       FValue.F := 0;
     jdtDateTime:
@@ -1745,6 +1795,8 @@ begin
       Result := FValue.I;
     jdtLong:
       Result := FValue.L;
+    jdtULong:
+      Result := FValue.U;
     jdtFloat:
       Result := FValue.F;
     jdtDateTime:
@@ -1780,6 +1832,8 @@ begin
         FValue.I := AValue;
       jdtLong:
         FValue.L := AValue;
+      jdtULong:
+        FValue.U := AValue;
       jdtFloat:
         FValue.F := AValue;
       jdtDateTime:
@@ -1829,6 +1883,8 @@ begin
       Result := IntToStr(FValue.I);
     jdtLong:
       Result := IntToStr(FValue.L);
+    jdtULong:
+      Result := UIntToStr(FValue.U);
     jdtFloat:
       Result := FloatToStr(FValue.F, JSONFormatSettings);
     jdtDateTime:
@@ -1890,6 +1946,8 @@ begin
       Result := FValue.I;
     jdtLong:
       Result := FValue.L;
+    jdtULong:
+      Result := FValue.U;
     jdtFloat:
       Result := Trunc(FValue.F);
     jdtDateTime:
@@ -1934,6 +1992,8 @@ begin
       Result := FValue.I;
     jdtLong:
       Result := FValue.L;
+    jdtULong:
+      Result := FValue.U;
     jdtFloat:
       Result := Trunc(FValue.F);
     jdtDateTime:
@@ -1966,6 +2026,52 @@ begin
   end;
 end;
 
+function TJsonDataValue.GetULongValue: UInt64;
+begin
+  case FTyp of
+    jdtNone:
+      Result := 0;
+    jdtString:
+      if not TryStrToUInt64(string(FValue.S), Result) then
+        Result := Trunc(StrToFloat(string(FValue.S), JSONFormatSettings));
+    jdtInt:
+      Result := FValue.I;
+    jdtLong:
+      Result := FValue.L;
+    jdtULong:
+      Result := FValue.U;
+    jdtFloat:
+      Result := Trunc(FValue.F);
+    jdtDateTime:
+      Result := Trunc(FValue.D);
+    jdtBool:
+      Result := Ord(FValue.B);
+    jdtObject:
+      begin
+        if not JsonSerializationConfig.NullConvertsToValueTypes or (FValue.O <> nil) then
+          TypeCastError(jdtULong);
+        Result := 0;
+      end;
+  else
+    TypeCastError(jdtULong);
+    Result := 0;
+  end;
+end;
+
+procedure TJsonDataValue.SetULongValue(const AValue: UInt64);
+var
+  LTyp: TJsonDataType;
+begin
+  LTyp := FTyp;
+  if (LTyp <> jdtULong) or (AValue <> FValue.U) then
+  begin
+    if LTyp <> jdtNone then
+      Clear;
+    FTyp := jdtULong;
+    FValue.U := AValue;
+  end;
+end;
+
 function TJsonDataValue.GetFloatValue: Double;
 begin
   case FTyp of
@@ -1977,6 +2083,8 @@ begin
       Result := FValue.I;
     jdtLong:
       Result := FValue.L;
+    jdtULong:
+      Result := FValue.U;
     jdtFloat:
       Result := FValue.F;
     jdtDateTime:
@@ -2020,6 +2128,8 @@ begin
       Result := FValue.I;
     jdtLong:
       Result := FValue.L;
+    jdtULong:
+      Result := FValue.U;
     jdtFloat:
       Result := FValue.F;
     jdtDateTime:
@@ -2063,6 +2173,8 @@ begin
       Result := FValue.I <> 0;
     jdtLong:
       Result := FValue.L <> 0;
+    jdtULong:
+      Result := FValue.U <> 0;
     jdtFloat:
       Result := FValue.F <> 0;
     jdtDateTime:
@@ -2155,17 +2267,12 @@ begin
     Result := InternIntToText(Cardinal(Value), False, EndP);
 end;
 
-function Int64ToText(Value: Int64; EndP: PChar): PChar;
+function UInt64ToText(Value: UInt64; EndP: PChar): PChar;
 var
-  Quotient: Int64;
-  Remainder: Integer;
-  Neg: Boolean;
+  Quotient: UInt64;
+  Remainder: Cardinal;
 begin
   Result := EndP;
-
-  Neg := Value < 0;
-  if Neg then
-    Value := -Value;
 
   while Value > High(Integer) do
   begin
@@ -2179,6 +2286,18 @@ begin
   end;
 
   Result := InternIntToText(Cardinal(Value), False, Result);
+end;
+
+function Int64ToText(Value: Int64; EndP: PChar): PChar;
+var
+  Neg: Boolean;
+begin
+  Neg := Value < 0;
+  if Neg then
+    Value := -Value;
+
+  Result := UInt64ToText(UInt64(Value), EndP);
+
   if Neg then
   begin
     Dec(Result);
@@ -2189,7 +2308,7 @@ end;
 procedure TJsonDataValue.InternToJSON(var Writer: TJsonOutputWriter);
 var
   Buffer: array[0..63] of Char;
-  P: PChar;
+  P, BufEnd: PChar;
 begin
   case FTyp of
     jdtNone:
@@ -2198,13 +2317,21 @@ begin
       TJsonBaseObject.StrToJSONStr(Writer.AppendStrValue, string(FValue.S));
     jdtInt:
       begin
-        P := IntToText(FValue.I, @PChar(@Buffer[0])[Length(Buffer)]);
-        Writer.AppendValue(P, PChar(@PChar(@Buffer[0])[Length(Buffer)]) - P); // extra typecast to work around a compiler bug (fixed in XE3)
+        BufEnd := @PChar(@Buffer[0])[Length(Buffer)]; // extra typecast to work around a compiler bug (fixed in XE3)
+        P := IntToText(FValue.I, BufEnd);
+        Writer.AppendValue(P, BufEnd - P);
       end;
     jdtLong:
       begin
-        P := Int64ToText(FValue.L, @PChar(@Buffer[0])[Length(Buffer)]);
-        Writer.AppendValue(P, PChar(@PChar(@Buffer[0])[Length(Buffer)]) - P); // extra typecast to work around a compiler bug (fixed in XE3)
+        BufEnd := @PChar(@Buffer[0])[Length(Buffer)]; // extra typecast to work around a compiler bug (fixed in XE3)
+        P := Int64ToText(FValue.L, BufEnd);
+        Writer.AppendValue(P, BufEnd - P);
+      end;
+    jdtULong:
+      begin
+        BufEnd := @PChar(@Buffer[0])[Length(Buffer)]; // extra typecast to work around a compiler bug (fixed in XE3)
+        P := UInt64ToText(FValue.U, BufEnd);
+        Writer.AppendValue(P, BufEnd - P);
       end;
     jdtFloat:
       Writer.AppendValue(Buffer, DoubleToText(Buffer, FValue.F));
@@ -2984,6 +3111,8 @@ begin
       Dest.FValue.I := Source.FValue.I;
     jdtLong:
       Dest.FValue.L := Source.FValue.L;
+    jdtULong:
+      Dest.FValue.U := Source.FValue.U;
     jdtFloat:
       Dest.FValue.F := Source.FValue.F;
     jdtDateTime:
@@ -3034,13 +3163,10 @@ begin
 end;
 
 procedure TJsonDataValue.TypeCastError(ExpectedType: TJsonDataType);
-const
-  DataTypeNames: array[TJsonDataType] of string = (
-    'null', 'String', 'Integer', 'Long', 'Float', 'DateTime', 'Bool', 'Array', 'Object'
-  );
 begin
-  raise EJsonCastException.CreateResFmt(@RsTypeCastError, [DataTypeNames[FTyp], DataTypeNames[ExpectedType]])
-        {$IFDEF HAS_RETURN_ADDRESS} at ReturnAddress{$ENDIF};
+  raise EJsonCastException.CreateResFmt(@RsTypeCastError,
+    [TJsonBaseObject.DataTypeNames[FTyp], TJsonBaseObject.DataTypeNames[ExpectedType]])
+    {$IFDEF HAS_RETURN_ADDRESS} at ReturnAddress{$ENDIF};
 end;
 
 { TJsonArrayEnumerator }
@@ -3232,6 +3358,15 @@ begin
   Result := FItems[Index].LongValue;
 end;
 
+function TJsonArray.GetULong(Index: Integer): UInt64;
+begin
+  {$IFDEF CHECK_ARRAY_INDEX}
+  if Cardinal(Index) >= Cardinal(FCount) then
+    RaiseListError(Index);
+  {$ENDIF CHECK_ARRAY_INDEX}
+  Result := FItems[Index].ULongValue;
+end;
+
 function TJsonArray.GetFloat(Index: Integer): Double;
 begin
   {$IFDEF CHECK_ARRAY_INDEX}
@@ -3284,7 +3419,7 @@ begin
   Data.ArrayValue := AValue;
 end;
 
-procedure TJsonArray.Add(AValue: Boolean);
+procedure TJsonArray.Add(const AValue: Boolean);
 var
   Data: PJsonDataValue;
 begin
@@ -3292,7 +3427,7 @@ begin
   Data.BoolValue := AValue;
 end;
 
-procedure TJsonArray.Add(AValue: Integer);
+procedure TJsonArray.Add(const AValue: Integer);
 var
   Data: PJsonDataValue;
 begin
@@ -3300,7 +3435,7 @@ begin
   Data.IntValue := AValue;
 end;
 
-procedure TJsonArray.Add(AValue: Int64);
+procedure TJsonArray.Add(const AValue: Int64);
 var
   Data: PJsonDataValue;
 begin
@@ -3308,7 +3443,15 @@ begin
   Data.LongValue := AValue;
 end;
 
-procedure TJsonArray.Add(AValue: Double);
+procedure TJsonArray.Add(const AValue: UInt64);
+var
+  Data: PJsonDataValue;
+begin
+  Data := AddItem;
+  Data.ULongValue := AValue;
+end;
+
+procedure TJsonArray.Add(const AValue: Double);
 var
   Data: PJsonDataValue;
 begin
@@ -3316,7 +3459,7 @@ begin
   Data.FloatValue := AValue;
 end;
 
-procedure TJsonArray.Add(AValue: TDateTime);
+procedure TJsonArray.Add(const AValue: TDateTime);
 var
   Data: PJsonDataValue;
 begin
@@ -3388,7 +3531,7 @@ begin
   Data.ArrayValue := AValue;
 end;
 
-procedure TJsonArray.Insert(Index: Integer; AValue: Boolean);
+procedure TJsonArray.Insert(Index: Integer; const AValue: Boolean);
 var
   Data: PJsonDataValue;
 begin
@@ -3396,7 +3539,7 @@ begin
   Data.BoolValue := AValue;
 end;
 
-procedure TJsonArray.Insert(Index: Integer; AValue: Integer);
+procedure TJsonArray.Insert(Index: Integer; const AValue: Integer);
 var
   Data: PJsonDataValue;
 begin
@@ -3404,7 +3547,7 @@ begin
   Data.IntValue := AValue;
 end;
 
-procedure TJsonArray.Insert(Index: Integer; AValue: Int64);
+procedure TJsonArray.Insert(Index: Integer; const AValue: Int64);
 var
   Data: PJsonDataValue;
 begin
@@ -3412,7 +3555,15 @@ begin
   Data.LongValue := AValue;
 end;
 
-procedure TJsonArray.Insert(Index: Integer; AValue: Double);
+procedure TJsonArray.Insert(Index: Integer; const AValue: UInt64);
+var
+  Data: PJsonDataValue;
+begin
+  Data := InsertItem(Index);
+  Data.ULongValue := AValue;
+end;
+
+procedure TJsonArray.Insert(Index: Integer; const AValue: Double);
 var
   Data: PJsonDataValue;
 begin
@@ -3420,7 +3571,7 @@ begin
   Data.FloatValue := AValue;
 end;
 
-procedure TJsonArray.Insert(Index: Integer; AValue: TDateTime);
+procedure TJsonArray.Insert(Index: Integer; const AValue: TDateTime);
 var
   Data: PJsonDataValue;
 begin
@@ -3514,6 +3665,15 @@ begin
     RaiseListError(Index);
   {$ENDIF CHECK_ARRAY_INDEX}
   FItems[Index].LongValue := Value;
+end;
+
+procedure TJsonArray.SetULong(Index: Integer; const Value: UInt64);
+begin
+  {$IFDEF CHECK_ARRAY_INDEX}
+  if Cardinal(Index) >= Cardinal(FCount) then
+    RaiseListError(Index);
+  {$ENDIF CHECK_ARRAY_INDEX}
+  FItems[Index].ULongValue := Value;
 end;
 
 procedure TJsonArray.SetFloat(Index: Integer; const Value: Double);
@@ -3895,6 +4055,16 @@ begin
     Result := 0;
 end;
 
+function TJsonObject.GetULong(const Name: string): UInt64;
+var
+  Item: PJsonDataValue;
+begin
+  if FindItem(Name, Item) then
+    Result := Item.ULongValue
+  else
+    Result := 0;
+end;
+
 function TJsonObject.GetFloat(const Name: string): Double;
 var
   Item: PJsonDataValue;
@@ -3959,6 +4129,11 @@ end;
 procedure TJsonObject.SetLong(const Name: string; const Value: Int64);
 begin
   RequireItem(Name).LongValue := Value;
+end;
+
+procedure TJsonObject.SetULong(const Name: string; const Value: UInt64);
+begin
+  RequireItem(Name).ULongValue := Value;
 end;
 
 procedure TJsonObject.SetFloat(const Name: string; const Value: Double);
@@ -4163,7 +4338,7 @@ begin
   Data.InternSetObjectValue(AValue);
 end;
 
-procedure TJsonObject.InternAdd(var AName: string; AValue: Boolean);
+procedure TJsonObject.InternAdd(var AName: string; const AValue: Boolean);
 var
   Data: PJsonDataValue;
 begin
@@ -4171,7 +4346,7 @@ begin
   Data.BoolValue := AValue;
 end;
 
-procedure TJsonObject.InternAdd(var AName: string; AValue: Integer);
+procedure TJsonObject.InternAdd(var AName: string; const AValue: Integer);
 var
   Data: PJsonDataValue;
 begin
@@ -4179,7 +4354,7 @@ begin
   Data.IntValue := AValue;
 end;
 
-procedure TJsonObject.InternAdd(var AName: string; AValue: Int64);
+procedure TJsonObject.InternAdd(var AName: string; const AValue: Int64);
 var
   Data: PJsonDataValue;
 begin
@@ -4187,7 +4362,15 @@ begin
   Data.LongValue := AValue;
 end;
 
-procedure TJsonObject.InternAdd(var AName: string; AValue: Double);
+procedure TJsonObject.InternAdd(var AName: string; const AValue: UInt64);
+var
+  Data: PJsonDataValue;
+begin
+  Data := InternAddItem(AName);
+  Data.ULongValue := AValue;
+end;
+
+procedure TJsonObject.InternAdd(var AName: string; const AValue: Double);
 var
   Data: PJsonDataValue;
 begin
@@ -4195,7 +4378,7 @@ begin
   Data.FloatValue := AValue;
 end;
 
-procedure TJsonObject.InternAdd(var AName: string; AValue: TDateTime);
+procedure TJsonObject.InternAdd(var AName: string; const AValue: TDateTime);
 var
   Data: PJsonDataValue;
 begin
@@ -4301,6 +4484,8 @@ begin
                       V := Item.IntValue;
                     jdtLong:
                       V := Item.LongValue;
+                    jdtULong:
+                      V := Item.ULongValue;
                     jdtFloat:
                       V := Item.FloatValue;
                     jdtDateTime:
@@ -5237,7 +5422,7 @@ begin
 end;
 
 {$IFDEF CPUX64}
-function ParseInt64Utf8(P, EndP: PByte): Int64;
+function ParseUInt64Utf8(P, EndP: PByte): UInt64;
 // RCX = P
 // RDX = EndP
 asm
@@ -5273,7 +5458,7 @@ asm
 end;
 {$ELSE}
   {$IFDEF CPUX86}
-function ParseInt64Utf8(P, EndP: PByte): Int64;
+function ParseUInt64Utf8(P, EndP: PByte): UInt64;
 asm
   cmp eax, edx
   jge @@LeaveFail
@@ -5326,7 +5511,7 @@ asm
   xor edx, edx
 end;
   {$ELSE}
-function ParseInt64Utf8(P, EndP: PByte): Int64;
+function ParseUInt64Utf8(P, EndP: PByte): UInt64;
 begin
   if P = EndP then
     Result := 0
@@ -5344,6 +5529,16 @@ end;
   {$ENDIF CPUX86}
 {$ENDIF CPUX64}
 
+function ParseAsDoubleUtf8(F, P: PByte): Double;
+begin
+  Result := 0.0;
+  while F < P do
+  begin
+    Result := Result * 10 + (F^ - Byte(Ord('0')));
+    Inc(F);
+  end;
+end;
+
 procedure TUtf8JsonReader.LexNumber(P: PByte{$IFDEF CPUARM}; EndP: PByte{$ENDIF});
 var
   F: PByte;
@@ -5355,6 +5550,7 @@ var
   Value, Scale: Double;
   Exponent, IntValue: Integer;
   Neg, NegE: Boolean;
+  DigitCount: Integer;
 begin
   {$IFNDEF CPUARM}
   EndP := FTextEnd;
@@ -5392,7 +5588,8 @@ begin
     end;
   end;
 
-  if P - F <= 9 then // Int32 fits 9 digits
+  DigitCount := P - F;
+  if DigitCount <= 9 then // Int32 fits 9 digits
   begin
     IntValue := 0;
     while F < P do
@@ -5413,37 +5610,46 @@ begin
     end;
     Value := FLook.I;
   end
-  else if P - F <= 19 then // Int64 fits 19 digits
+  else if DigitCount <= 20 then // UInt64 fits 20 digits (not all)
   begin
-    FLook.L := ParseInt64Utf8(F, P);
-    FLook.Kind := jtkLong;
-    if not (P^ in [Ord('.'), Ord('E'), Ord('e')]) then
+    FLook.U := ParseUInt64Utf8(F, P);
+    if (DigitCount = 20) and (FLook.U mod 10 <> PByte(P - 1)^ - Byte(Ord('0'))) then // overflow => too large
+      Value := ParseAsDoubleUtf8(F, P)
+    else if Neg and ((DigitCount = 20) or ((DigitCount = 19) and (FLook.HI and $80000000 <> 0))) then
+      // "negative UInt64" doesn't fit into UInt64/Int64 => use Double
+      Value := FLook.U
+    else
     begin
-      // just an integer
-      if Neg then
-      begin
-        if (FLook.HI = 0) and (FLook.I >= 0) then // 32bit Integer
-        begin
-          FLook.I := -FLook.I;
-          FLook.Kind := jtkInt;
-        end
-        else                 // 64bit Integer
-          FLook.L := -FLook.L;
+      FLook.Kind := jtkLong;
+      case DigitCount of
+        19:
+         if FLook.HI and $80000000 <> 0 then // can't be negative because we cached that case already
+           FLook.Kind := jtkULong;
+        20:
+          FLook.Kind := jtkULong;
       end;
-      FText := P;
-      Exit;
+
+      if not (P^ in [Ord('.'), Ord('E'), Ord('e')]) then
+      begin
+        // just an integer
+        if Neg then
+        begin
+          if (FLook.HI = 0) and (FLook.I >= 0) then // 32bit Integer
+          begin
+            FLook.I := -FLook.I;
+            FLook.Kind := jtkInt;
+          end
+          else                 // 64bit Integer
+            FLook.L := -FLook.L;
+        end;
+        FText := P;
+        Exit;
+      end;
+      Value := FLook.U;
     end;
-    Value := FLook.L;
   end
   else
-  begin
-    Value := 0.0;
-    while F < P do
-    begin
-      Value := Value * 10 + (F^ - Byte(Ord('0')));
-      Inc(F);
-    end;
-  end;
+    Value := ParseAsDoubleUtf8(F, P);
 
   // decimal digits
   if (P + 1 < EndP) and (P^ = Byte(Ord('.'))) then
@@ -5455,7 +5661,7 @@ begin
       EndInt64P := EndP;
     while (P < EndInt64P) and (P^ in [Ord('0')..Ord('9')]) do
       Inc(P);
-    Value := Value + ParseInt64Utf8(F, P) / Power10[P - F];
+    Value := Value + ParseUInt64Utf8(F, P) / Power10[P - F];
 
     // "Double" can't handle that many digits
     while (P < EndP) and (P^ in [Ord('0')..Ord('9')]) do
@@ -5704,7 +5910,7 @@ begin
 end;
 
 {$IFDEF CPUX64}
-function ParseInt64(P, EndP: PWideChar): Int64;
+function ParseUInt64(P, EndP: PWideChar): UInt64;
 // RCX = P
 // RDX = EndP
 asm
@@ -5740,7 +5946,7 @@ asm
 end;
 {$ELSE}
   {$IFDEF CPUX86}
-function ParseInt64(P, EndP: PWideChar): Int64;
+function ParseUInt64(P, EndP: PWideChar): UInt64;
 asm
   cmp eax, edx
   jge @@LeaveFail
@@ -5793,7 +5999,7 @@ asm
   xor edx, edx
 end;
   {$ELSE}
-function ParseInt64(P, EndP: PWideChar): Int64;
+function ParseUInt64(P, EndP: PWideChar): UInt64;
 begin
   if P = EndP then
     Result := 0
@@ -5811,6 +6017,16 @@ end;
   {$ENDIF CPUX86}
 {$ENDIF CPUX64}
 
+function ParseAsDouble(F, P: PWideChar): Double;
+begin
+  Result := 0.0;
+  while F < P do
+  begin
+    Result := Result * 10 + (Ord(F^) - Ord('0'));
+    Inc(F);
+  end;
+end;
+
 procedure TStringJsonReader.LexNumber(P: PChar{$IFDEF CPUARM}; EndP: PChar{$ENDIF});
 var
   F: PChar;
@@ -5822,6 +6038,7 @@ var
   Value, Scale: Double;
   Exponent, IntValue: Integer;
   Neg, NegE: Boolean;
+  DigitCount: Integer;
 begin
   {$IFNDEF CPUARM}
   EndP := FTextEnd;
@@ -5859,7 +6076,8 @@ begin
     end;
   end;
 
-  if P - F <= 9 then // Int32 fits 9 digits
+  DigitCount := P - F;
+  if DigitCount <= 9 then // Int32 fits 9 digits
   begin
     IntValue := 0;
     while F < P do
@@ -5880,37 +6098,46 @@ begin
     end;
     Value := FLook.I;
   end
-  else if P - F <= 19 then // Int64 fits 19 digits
+  else if DigitCount <= 20 then // UInt64 fits 20 digits (not all)
   begin
-    FLook.L := ParseInt64(F, P);
-    FLook.Kind := jtkLong;
-    if not (P^ in ['.', 'E', 'e']) then
+    FLook.U := ParseUInt64(F, P);
+    if (DigitCount = 20) and (FLook.U mod 10 <> Ord(PWideChar(P - 1)^) - Ord('0')) then // overflow => too large
+      Value := ParseAsDouble(F, P)
+    else if Neg and ((DigitCount = 20) or ((DigitCount = 19) and (FLook.HI and $80000000 <> 0))) then
+      // "negative UInt64" doesn't fit into UInt64/Int64 => use Double
+      Value := FLook.U
+    else
     begin
-      // just an integer
-      if Neg then
-      begin
-        if (FLook.HI = 0) and (FLook.I >= 0) then // 32bit Integer
-        begin
-          FLook.I := -FLook.I;
-          FLook.Kind := jtkInt;
-        end
-        else                 // 64bit Integer
-          FLook.L := -FLook.L;
+      FLook.Kind := jtkLong;
+      case DigitCount of
+        19:
+         if FLook.HI and $80000000 <> 0 then // can't be negative because we cached that case already
+           FLook.Kind := jtkULong;
+        20:
+          FLook.Kind := jtkULong;
       end;
-      FText := P;
-      Exit;
+
+      if not (P^ in ['.', 'E', 'e']) then
+      begin
+        // just an integer
+        if Neg then
+        begin
+          if (FLook.HI = 0) and (FLook.I >= 0) then // 32bit Integer
+          begin
+            FLook.I := -FLook.I;
+            FLook.Kind := jtkInt;
+          end
+          else                 // 64bit Integer
+            FLook.L := -FLook.L;
+        end;
+        FText := P;
+        Exit;
+      end;
+      Value := FLook.U;
     end;
-    Value := FLook.L;
   end
   else
-  begin
-    Value := 0.0;
-    while F < P do
-    begin
-      Value := Value * 10 + (Ord(F^) - Ord('0'));
-      Inc(F);
-    end;
-  end;
+    Value := ParseAsDouble(F, P);
 
   // decimal digits
   if (P + 1 < EndP) and (P^ = '.') then
@@ -5922,7 +6149,7 @@ begin
       EndInt64P := EndP;
     while (P < EndInt64P) and (P^ in ['0'..'9']) do
       Inc(P);
-    Value := Value + ParseInt64(F, P) / Power10[P - F];
+    Value := Value + ParseUInt64(F, P) / Power10[P - F];
 
     // "Double" can't handle that many digits
     while (P < EndP) and (P^ in ['0'..'9']) do
@@ -6089,6 +6316,8 @@ begin
         Result := IntToStr(Value.FData.FIntValue);
       jdtLong:
         Result := IntToStr(Value.FData.FLongValue);
+      jdtULong:
+        Result := UIntToStr(Value.FData.FULongValue);
       jdtFloat:
         Result := FloatToStr(Value.FData.FFloatValue, JSONFormatSettings);
       jdtDateTime:
@@ -6128,6 +6357,8 @@ begin
         Result := Value.FData.FIntValue;
       jdtLong:
         Result := Value.FData.FLongValue;
+      jdtULong:
+        Result := Value.FData.FULongValue;
       jdtFloat:
         Result := Trunc(Value.FData.FFloatValue);
       jdtDateTime:
@@ -6164,6 +6395,8 @@ begin
         Result := Value.FData.FIntValue;
       jdtLong:
         Result := Value.FData.FLongValue;
+      jdtULong:
+        Result := Value.FData.FULongValue;
       jdtFloat:
         Result := Trunc(Value.FData.FFloatValue);
       jdtDateTime:
@@ -6174,6 +6407,44 @@ begin
       Result := 0;
     end;
 end;
+
+//class operator TJsonDataValueHelper.Implicit(const Value: UInt64): TJsonDataValueHelper;
+//begin
+//  Result.FData.FName := '';
+//  Result.FData.FNameResolver := nil;
+//  Result.FData.FIntern := nil;
+//  {$IFDEF AUTOREFCOUNT}
+//  if Result.FData.FObj <> nil then
+//    Result.FData.FObj := nil;
+//  {$ENDIF AUTOREFCOUNT}
+//  Result.FData.FTyp := jdtULong;
+//  Result.FData.FULongValue := Value;
+//end;
+//
+//class operator TJsonDataValueHelper.Implicit(const Value: TJsonDataValueHelper): UInt64;
+//begin
+//  if Value.FData.FIntern <> nil then
+//    Result := Value.FData.FIntern.LongValue
+//  else
+//    case Value.FData.FTyp of
+//      jdtString:
+//        Result := StrToInt64Def(Value.FData.FValue, 0);
+//      jdtInt:
+//        Result := Value.FData.FIntValue;
+//      jdtLong:
+//        Result := Value.FData.FLongValue;
+//      jdtULong:
+//        Result := Value.FData.FULongValue;
+//      jdtFloat:
+//        Result := Trunc(Value.FData.FFloatValue);
+//      jdtDateTime:
+//        Result := Trunc(Value.FData.FDateTimeValue);
+//      jdtBool:
+//        Result := Ord(Value.FData.FBoolValue);
+//    else
+//      Result := 0;
+//    end;
+//end;
 
 class operator TJsonDataValueHelper.Implicit(const Value: Double): TJsonDataValueHelper;
 begin
@@ -6200,6 +6471,8 @@ begin
         Result := Value.FData.FIntValue;
       jdtLong:
         Result := Value.FData.FLongValue;
+      jdtULong:
+        Result := Value.FData.FULongValue;
       jdtFloat:
         Result := Value.FData.FFloatValue;
       jdtDateTime:
@@ -6236,6 +6509,8 @@ begin
         Result := Value.FData.FIntValue;
       jdtLong:
         Result := Value.FData.FLongValue;
+      jdtULong:
+        Result := Value.FData.FULongValue;
       jdtFloat:
         Result := Value.FData.FFloatValue;
       jdtDateTime:
@@ -6272,6 +6547,8 @@ begin
         Result := Value.FData.FIntValue;
       jdtLong:
         Result := Value.FData.FLongValue;
+      jdtULong:
+        Result := Value.FData.FULongValue;
       jdtFloat:
         Result := Value.FData.FFloatValue;
       jdtDateTime:
@@ -6308,6 +6585,8 @@ begin
         Result := Value.FData.FIntValue <> 0;
       jdtLong:
         Result := Value.FData.FLongValue <> 0;
+      jdtULong:
+        Result := Value.FData.FULongValue <> 0;
       jdtFloat:
         Result := Value.FData.FFloatValue <> 0;
       jdtDateTime:
@@ -6402,6 +6681,8 @@ begin
         Result := Value.FData.FIntValue;
       jdtLong:
         Result := Value.FData.FLongValue;
+      jdtULong:
+        Result := Value.FData.FULongValue;
       jdtFloat:
         Result := Value.FData.FFloatValue;
       jdtDateTime:
@@ -6443,6 +6724,8 @@ begin
         Result.FData.FIntValue := Value;
       jdtLong:
         Result.FData.FLongValue := Value;
+      jdtULong:
+        Result.FData.FULongValue := Value;
       jdtFloat:
         Result.FData.FFloatValue := Value;
       jdtDateTime:
@@ -6493,6 +6776,54 @@ begin
     FData.FIntern.LongValue := Value
   else
     Self := Value;
+end;
+
+function TJsonDataValueHelper.GetULongValue: UInt64;
+begin
+//  Result := Self;
+  // copied from UInt64 implicit operator
+  if FData.FIntern <> nil then
+    Result := FData.FIntern.LongValue
+  else
+    case FData.FTyp of
+      jdtString:
+        Result := StrToInt64Def(FData.FValue, 0);
+      jdtInt:
+        Result := FData.FIntValue;
+      jdtLong:
+        Result := FData.FLongValue;
+      jdtULong:
+        Result := FData.FULongValue;
+      jdtFloat:
+        Result := Trunc(FData.FFloatValue);
+      jdtDateTime:
+        Result := Trunc(FData.FDateTimeValue);
+      jdtBool:
+        Result := Ord(FData.FBoolValue);
+    else
+      Result := 0;
+    end;
+end;
+
+procedure TJsonDataValueHelper.SetULongValue(const Value: UInt64);
+begin
+  ResolveName;
+  if FData.FIntern <> nil then
+    FData.FIntern.ULongValue := Value
+  else
+  begin
+    //Self := Value;
+    // copied from UInt64 implicit operator
+    FData.FName := '';
+    FData.FNameResolver := nil;
+    FData.FIntern := nil;
+    {$IFDEF AUTOREFCOUNT}
+    if FData.FObj <> nil then
+      FData.FObj := nil;
+    {$ENDIF AUTOREFCOUNT}
+    FData.FTyp := jdtLong;
+    FData.FLongValue := Value;
+  end;
 end;
 
 function TJsonDataValueHelper.GetFloatValue: Double;
@@ -6605,6 +6936,8 @@ begin
         Item.IntValue := Value.FData.FIntValue;
       jdtLong:
         Item.LongValue := Value.FData.FLongValue;
+      jdtULong:
+        Item.ULongValue := Value.FData.FULongValue;
       jdtFloat:
         Item.FloatValue := Value.FData.FFloatValue;
       jdtDateTime:
@@ -6656,6 +6989,11 @@ begin
   Result := ObjectValue.L[Name];
 end;
 
+function TJsonDataValueHelper.GetObjectULong(const Name: string): UInt64;
+begin
+  Result := ObjectValue.U[Name];
+end;
+
 function TJsonDataValueHelper.GetObjectFloat(const Name: string): Double;
 begin
   Result := ObjectValue.F[Name];
@@ -6699,6 +7037,11 @@ end;
 procedure TJsonDataValueHelper.SetObjectLong(const Name: string; const Value: Int64);
 begin
   ObjectValue.L[Name] := Value;
+end;
+
+procedure TJsonDataValueHelper.SetObjectULong(const Name: string; const Value: UInt64);
+begin
+  ObjectValue.U[Name] := Value;
 end;
 
 procedure TJsonDataValueHelper.SetObjectFloat(const Name: string; const Value: Double);
