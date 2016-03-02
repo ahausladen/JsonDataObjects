@@ -1081,6 +1081,42 @@ end;
   {$ENDIF DEBUG}
 {$ENDIF USE_FAST_STRASG_FOR_INTERNAL_STRINGS}
 
+{$IF not declared(TryStrToUInt64)}
+function TryStrToUInt64(const S: string; out Value: UInt64): Boolean;
+var
+  P, EndP: PChar;
+  V: UInt64;
+  Digit: Integer;
+begin
+  // No support for hexadecimal strings
+
+  P := PChar(S);
+  EndP := P + Length(S);
+  // skip spaces
+  while (P < EndP) and (P^ = ' ') do
+    Inc(P);
+  if P^ = '-' then
+    Result := False // UInt64 cannot be negative
+  else
+  begin
+    V := 0;
+    while P < EndP do
+    begin
+      Digit := Integer(Ord(P^)) - Ord('0');
+      if (Cardinal(Digit) >= 10) or (V > High(UInt64) div 10) then
+        Break;
+      //V := V * 10 + Digit;
+      V := (V shl 3) + (V shl 1) + Digit;
+      Inc(P);
+    end;
+
+    Result := P = EndP;
+    if Result then
+      Value := V;
+  end;
+end;
+{$IFEND}
+
 function GetHexDigitsUtf8(P: PByte; Count: Integer): LongWord;
 var
   Ch: Byte;
