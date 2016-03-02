@@ -58,6 +58,7 @@ type
     procedure TestVariantNull;
     procedure TestUInt64;
     procedure TestProgress;
+    procedure TestSyntaxErrors;
   end;
 
   TestTJsonArray = class(TTestCase)
@@ -1572,6 +1573,51 @@ begin
     end;
   finally
     Json.Free;
+  end;
+end;
+
+procedure TestTJsonBaseObject.TestSyntaxErrors;
+begin
+  try
+    TJsonBaseObject.ParseUtf8('{ "abc": '#13#10'"val'#10'ue", . }').Free;
+    CheckTrue(False, 'EJsonParserSyntaxException was not raised');
+  except
+    on E: EJsonParserException do
+    begin
+      CheckEquals(2, E.LineNum, 'LineNum');
+      CheckEquals(5, E.Column, 'Column');
+      CheckEquals(15, E.Position, 'Position');
+    end
+    else
+      CheckTrue(False, 'EJsonParserSyntaxException was not raised');
+  end;
+
+  try
+    TJsonBaseObject.ParseUtf8('{ "abc": '#13#10'"value');
+    CheckTrue(False, 'EJsonParserSyntaxException was not raised');
+  except
+    on E: EJsonParserException do
+    begin
+      CheckEquals(2, E.LineNum, 'LineNum');
+      CheckEquals(1, E.Column, 'Column');
+      CheckEquals(11, E.Position, 'Position');
+    end
+    else
+      CheckTrue(False, 'EJsonParserSyntaxException was not raised');
+  end;
+
+  try
+    TJsonBaseObject.ParseUtf8('{ "abc": '#13#10'"value", . }').Free;
+    CheckTrue(False, 'EJsonParserSyntaxException was not raised');
+  except
+    on E: EJsonParserException do
+    begin
+      CheckEquals(2, E.LineNum, 'LineNum');
+      CheckEquals(11, E.Column, 'Column');
+      CheckEquals(21, E.Position, 'Position');
+    end
+    else
+      CheckTrue(False, 'EJsonParserSyntaxException was not raised');
   end;
 end;
 

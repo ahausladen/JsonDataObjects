@@ -119,9 +119,22 @@ type
   TJsonArray = class;
 
   EJsonException = class(Exception);
-  EJsonParserException = class(EJsonException);
   EJsonCastException = class(EJsonException);
   EJsonPathException = class(EJsonException);
+
+  EJsonParserException = class(EJsonException)
+  private
+    FColumn: NativeInt;
+    FPosition: NativeInt;
+    FLineNum: NativeInt;
+  public
+    constructor CreateResFmt(ResStringRec: PResStringRec; const Args: array of const; ALineNum, AColumn, APosition: NativeInt);
+    constructor CreateRes(ResStringRec: PResStringRec; ALineNum, AColumn, APosition: NativeInt);
+
+    property LineNum: NativeInt read FLineNum;   // base 1
+    property Column: NativeInt read FColumn;     // base 1
+    property Position: NativeInt read FPosition; // base 0  Utf8Char/WideChar index
+  end;
 
   {$IFDEF SUPPORT_PROGRESS}
   TJsonReaderProgressProc = procedure(Data: Pointer; Percentage: Integer; Position, Size: NativeInt);
@@ -439,8 +452,6 @@ type
     {$ENDIF USE_FAST_AUTOREFCOUNT}
   protected
     procedure InternToJSON(var Writer: TJsonOutputWriter); virtual; abstract;
-    class procedure JSONStrToStr(P, EndP: PChar; FirstEscapeIndex: Integer; var S: string); static;
-    class procedure JSONUtf8StrToStr(P, EndP: PByte; FirstEscapeIndex: Integer; var S: string); static;
   public
     const DataTypeNames: array[TJsonDataType] of string = (
       'null', 'String', 'Integer', 'Long', 'ULong', 'Float', 'DateTime', 'Bool', 'Array', 'Object'
@@ -800,6 +811,8 @@ resourcestring
   RsUnsupportedFileEncoding = 'File encoding is not supported';
   RsUnexpectedEndOfFile = 'Unexpected end of file where %s was expected';
   RsUnexpectedToken = 'Expected %s but found %s';
+  RsInvalidStringCharacter = 'Invalid character in string';
+  RsStringNotClosed = 'String not closed';
   RsInvalidHexNumber = 'Invalid hex number "%s"';
   RsTypeCastError = 'Cannot cast %s into %s';
   RsMissingClassInfo = 'Class "%s" doesn''t have type information. {$M+} was not specified';
@@ -924,21 +937,33 @@ type
     procedure AcceptFailed(TokenKind: TJsonTokenKind);
   protected
     FLook: TJsonToken;
+    FLineNum: Integer;
+    FStart: Pointer;
+    FLineStart: Pointer;
     {$IFDEF SUPPORT_PROGRESS}
     FLastProgressValue: NativeInt;
-    FStartP: Pointer;
     FSize: NativeInt;
     FProgress: PJsonReaderProgressRec;
     procedure CheckProgress(Position: Pointer);
     {$ENDIF SUPPORT_PROGRESS}
+    function GetLineColumn: NativeInt;
+    function GetPosition: NativeInt;
+    function GetCharOffset(StartPos: Pointer): NativeInt; virtual; abstract;
     function Next: Boolean; virtual; abstract;
+
+    class procedure InvalidStringCharacterError(const Reader: TJsonReader); static;
+    class procedure StringNotClosedError(const Reader: TJsonReader); static;
+    class procedure JSONStrToStr(P, EndP: PChar; FirstEscapeIndex: Integer; var S: string;
+      const Reader: TJsonReader); static;
+    class procedure JSONUtf8StrToStr(P, EndP: PByte; FirstEscapeIndex: Integer; var S: string;
+      const Reader: TJsonReader); static;
   public
     {$IFDEF USE_FAST_NEWINSTANCE}
     class function NewInstance: TObject {$IFDEF AUTOREFCOUNT} unsafe {$ENDIF}; override;
     procedure FreeInstance; override;
     {$ENDIF USE_FAST_NEWINSTANCE}
 
-    constructor Create({$IFDEF SUPPORT_PROGRESS}AStartP: Pointer; ASize: NativeInt; AProgress: PJsonReaderProgressRec{$ENDIF});
+    constructor Create(AStart: Pointer; {$IFDEF SUPPORT_PROGRESS}ASize: NativeInt; AProgress: PJsonReaderProgressRec{$ENDIF});
     destructor Destroy; override;
     procedure Parse(Data: TJsonBaseObject);
   end;
@@ -948,6 +973,7 @@ type
     FText: PByte;
     FTextEnd: PByte;
   protected
+    function GetCharOffset(StartPos: Pointer): NativeInt; override; final;
     function Next: Boolean; override; final;
     // ARM optimization: Next() already has EndP in a local variable so don't use the slow indirect
     // access to FTextEnd.
@@ -963,6 +989,7 @@ type
     FText: PChar;
     FTextEnd: PChar;
   protected
+    function GetCharOffset(StartPos: Pointer): NativeInt; override; final;
     function Next: Boolean; override; final;
     // ARM optimization: Next() already has EndP in a local variable so don't use the slow indirect
     // access to FTextEnd.
@@ -970,7 +997,7 @@ type
     procedure LexNumber(P: PChar{$IFDEF CPUARM}; EndP: PChar{$ENDIF});
     procedure LexIdent(P: PChar{$IFDEF CPUARM}; EndP: PChar{$ENDIF});
   public
-    constructor Create(const S: PChar; Len: Integer{$IFDEF SUPPORT_PROGRESS}; AProgress: PJsonReaderProgressRec{$ENDIF});
+    constructor Create(S: PChar; Len: Integer{$IFDEF SUPPORT_PROGRESS}; AProgress: PJsonReaderProgressRec{$ENDIF});
   end;
 
   TMemoryStreamAccess = class(TMemoryStream);
@@ -1034,6 +1061,25 @@ begin
   end;
 end;
 {$ENDIF USE_NAME_STRING_LITERAL}
+
+{ EJsonParserSyntaxException }
+
+constructor EJsonParserException.CreateResFmt(ResStringRec: PResStringRec; const Args: array of const;
+  ALineNum, AColumn, APosition: NativeInt);
+begin
+  inherited CreateResFmt(ResStringRec, Args);
+  FLineNum := ALineNum;
+  FColumn := AColumn;
+  FPosition := APosition;
+end;
+
+constructor EJsonParserException.CreateRes(ResStringRec: PResStringRec; ALineNum, AColumn, APosition: NativeInt);
+begin
+  inherited CreateRes(ResStringRec);
+  FLineNum := ALineNum;
+  FColumn := AColumn;
+  FPosition := APosition;
+end;
 
 procedure ListError(Msg: PResStringRec; Data: Integer);
 begin
@@ -1117,7 +1163,7 @@ begin
 end;
 {$IFEND}
 
-function GetHexDigitsUtf8(P: PByte; Count: Integer): LongWord;
+function GetHexDigitsUtf8(P: PByte; Count: Integer; const Reader: TJsonReader): LongWord;
 var
   Ch: Byte;
 begin
@@ -1136,10 +1182,10 @@ begin
     Dec(Count);
   end;
   if Count > 0 then
-    raise EJsonParserException.CreateResFmt(@RsInvalidHexNumber, [P^]);
+    raise EJsonParserException.CreateResFmt(@RsInvalidHexNumber, [P^], Reader.FLineNum, Reader.GetLineColumn, Reader.GetPosition);
 end;
 
-function GetHexDigits(P: PChar; Count: Integer): LongWord;
+function GetHexDigits(P: PChar; Count: Integer; const Reader: TJsonReader): LongWord;
 var
   Ch: Char;
 begin
@@ -1158,7 +1204,7 @@ begin
     Dec(Count);
   end;
   if Count > 0 then
-    raise EJsonParserException.CreateResFmt(@RsInvalidHexNumber, [P^]);
+    raise EJsonParserException.CreateResFmt(@RsInvalidHexNumber, [P^], Reader.FLineNum, Reader.GetLineColumn, Reader.GetPosition);
 end;
 
 function UtcDateTimeToLocalDateTime(UtcDateTime: TDateTime): TDateTime;
@@ -1477,7 +1523,7 @@ begin
 end;
 {$ENDIF ~USE_FAST_NEWINSTANCE}
 
-constructor TJsonReader.Create({$IFDEF SUPPORT_PROGRESS}AStartP: Pointer; ASize: NativeInt; AProgress: PJsonReaderProgressRec{$ENDIF});
+constructor TJsonReader.Create(AStart: Pointer; {$IFDEF SUPPORT_PROGRESS}ASize: NativeInt; AProgress: PJsonReaderProgressRec{$ENDIF});
 begin
   //inherited Create;
   {$IFDEF USE_FAST_NEWINSTANCE}
@@ -1488,8 +1534,11 @@ begin
   FIdents.Init;
   {$ENDIF USE_STRINGINTERN_FOR_NAMES}
 
+  FStart := AStart;
+  FLineNum := 1; // base 1
+  FLineStart := nil;
+
   {$IFDEF SUPPORT_PROGRESS}
-  FStartP := AStartP;
   FSize := ASize;
   FProgress := AProgress;
   FLastProgressValue := 0; // class is not zero-filled
@@ -1523,7 +1572,7 @@ var
 begin
   if {(FProgress <> nil) and} Assigned(FProgress.Progress) then
   begin
-    Ps := PByte(Position) - PByte(FStartP);
+    Ps := PByte(Position) - PByte(FStart);
     if FProgress.Threshold = 0 then
     begin
       NewPercentage := Ps * 100 div FSize;
@@ -1548,36 +1597,201 @@ begin
 end;
 {$ENDIF SUPPORT_PROGRESS}
 
+function TJsonReader.GetLineColumn: NativeInt;
+begin
+  if FLineStart = nil then
+    FLineStart := FStart;
+  Result := GetCharOffset(FLineStart) + 1; // base 1
+end;
+
+function TJsonReader.GetPosition: NativeInt;
+begin
+  Result := GetCharOffset(FStart);
+end;
+
+class procedure TJsonReader.InvalidStringCharacterError(const Reader: TJsonReader);
+begin
+  raise EJsonParserException.CreateRes(@RsInvalidStringCharacter,
+    Reader.FLineNum, Reader.GetLineColumn, Reader.GetPosition);
+end;
+
+class procedure TJsonReader.StringNotClosedError(const Reader: TJsonReader);
+begin
+  raise EJsonParserException.CreateRes(@RsStringNotClosed,
+    Reader.FLineNum, Reader.GetLineColumn, Reader.GetPosition);
+end;
+
+class procedure TJsonReader.JSONStrToStr(P, EndP: PChar; FirstEscapeIndex: Integer; var S: string;
+  const Reader: TJsonReader);
+const
+  MaxBufPos = 127;
+var
+  Buf: array[0..MaxBufPos] of Char;
+  F: PChar;
+  BufPos, Len: Integer;
+begin
+  Dec(FirstEscapeIndex);
+
+  if FirstEscapeIndex > 0 then
+  begin
+    SetString(S, P, FirstEscapeIndex);
+    Inc(P, FirstEscapeIndex);
+  end
+  else
+    S := '';
+
+  while True do
+  begin
+    BufPos := 0;
+    while (P < EndP) and (P^ = '\') do
+    begin
+      Inc(P);
+      if P = EndP then // broken escaped character
+        Break;
+      case P^ of
+        '"': Buf[BufPos] := '"';
+        '\': Buf[BufPos] := '\';
+        '/': Buf[BufPos] := '/';
+        'b': Buf[BufPos] := #8;
+        'f': Buf[BufPos] := #12;
+        'n': Buf[BufPos] := #10;
+        'r': Buf[BufPos] := #13;
+        't': Buf[BufPos] := #9;
+        'u':
+          begin
+            Inc(P);
+            if P + 3 >= EndP then
+              Break;
+            Buf[BufPos] := Char(GetHexDigits(P, 4, TJsonReader(Reader)));
+            Inc(P, 3);
+          end;
+      else
+        Break;
+      end;
+      Inc(P);
+
+      Inc(BufPos);
+      if BufPos > MaxBufPos then
+      begin
+        Len := Length(S);
+        SetLength(S, Len + BufPos);
+        Move(Buf[0], PChar(Pointer(S))[Len], BufPos * SizeOf(Char));
+        BufPos := 0;
+      end;
+    end;
+    // append remaining buffer
+    if BufPos > 0 then
+    begin
+      Len := Length(S);
+      SetLength(S, Len + BufPos);
+      Move(Buf[0], PChar(Pointer(S))[Len], BufPos * SizeOf(Char));
+    end;
+
+    // fast forward
+    F := P;
+    while (P < EndP) and (P^ <> '\') do
+      Inc(P);
+    if P > F then
+      AppendString(S, F, P - F);
+    if P >= EndP then
+      Break;
+  end;
+end;
+
+class procedure TJsonReader.JSONUtf8StrToStr(P, EndP: PByte; FirstEscapeIndex: Integer; var S: string;
+  const Reader: TJsonReader);
+const
+  MaxBufPos = 127;
+var
+  Buf: array[0..MaxBufPos] of Char;
+  F: PByte;
+  BufPos, Len: Integer;
+begin
+  Dec(FirstEscapeIndex);
+
+  if FirstEscapeIndex > 0 then
+  begin
+    SetStringUtf8(S, P, FirstEscapeIndex);
+    Inc(P, FirstEscapeIndex);
+  end
+  else
+    S := '';
+
+  while True do
+  begin
+    BufPos := 0;
+    while (P < EndP) and (P^ = Byte(Ord('\'))) do
+    begin
+      Inc(P);
+      if P = EndP then // broken escaped character
+        Break;
+      case P^ of
+        Ord('"'): Buf[BufPos] := '"';
+        Ord('\'): Buf[BufPos] := '\';
+        Ord('/'): Buf[BufPos] := '/';
+        Ord('b'): Buf[BufPos] := #8;
+        Ord('f'): Buf[BufPos] := #12;
+        Ord('n'): Buf[BufPos] := #10;
+        Ord('r'): Buf[BufPos] := #13;
+        Ord('t'): Buf[BufPos] := #9;
+        Ord('u'):
+          begin
+            Inc(P);
+            if P + 3 >= EndP then
+              Break;
+            Buf[BufPos] := Char(GetHexDigitsUtf8(P, 4, TJsonReader(Reader)));
+            Inc(P, 3);
+          end;
+      else
+        Break;
+      end;
+      Inc(P);
+
+      Inc(BufPos);
+      if BufPos > MaxBufPos then
+      begin
+        Len := Length(S);
+        SetLength(S, Len + BufPos);
+        Move(Buf[0], PChar(Pointer(S))[Len], BufPos * SizeOf(Char));
+        BufPos := 0;
+      end;
+    end;
+    // append remaining buffer
+    if BufPos > 0 then
+    begin
+      Len := Length(S);
+      SetLength(S, Len + BufPos);
+      Move(Buf[0], PChar(Pointer(S))[Len], BufPos * SizeOf(Char));
+    end;
+
+    // fast forward
+    F := P;
+    while (P < EndP) and (P^ <> Byte(Ord('\'))) do
+      Inc(P);
+    if P > F then
+      AppendStringUtf8(S, F, P - F);
+    if P >= EndP then
+      Break;
+  end;
+end;
+
 procedure TJsonReader.Parse(Data: TJsonBaseObject);
 begin
   if Data is TJsonObject then
   begin
     TJsonObject(Data).Clear;
     Next; // initialize Lexer
-    {case FLook.Kind of
-      jtkLBracket:
-        begin
-          FPropName := '';
-          ParseObjectPropertyValue(TJsonObject(Data));
-        end
-    else}
-      Accept(jtkLBrace);
-      ParseObjectBody(TJsonObject(Data));
-      Accept(jtkRBrace);
-    //end;
+    Accept(jtkLBrace);
+    ParseObjectBody(TJsonObject(Data));
+    Accept(jtkRBrace);
   end
   else if Data is TJsonArray then
   begin
     TJsonArray(Data).Clear;
     Next; // initialize Lexer
-    {case FLook.Kind of
-      jtkLBrace:
-        ParseArrayPropertyValue(TJsonArray(Data));
-    else}
-      Accept(jtkLBracket);
-      ParseArrayBody(TJsonArray(Data));
-      Accept(jtkRBracket)
-    //end;
+    Accept(jtkLBracket);
+    ParseArrayBody(TJsonArray(Data));
+    Accept(jtkRBracket)
   end;
 end;
 
@@ -1776,10 +1990,14 @@ begin
 end;
 
 procedure TJsonReader.AcceptFailed(TokenKind: TJsonTokenKind);
+var
+  Col, Position: NativeInt;
 begin
+  Col := GetLineColumn;
+  Position := GetPosition;
   if FLook.Kind = jtkEof then
-    raise EJsonParserException.CreateResFmt(@RsUnexpectedEndOfFile, [JsonTokenKindToStr[TokenKind]]);
-  raise EJsonParserException.CreateResFmt(@RsUnexpectedToken, [JsonTokenKindToStr[TokenKind], JsonTokenKindToStr[FLook.Kind]]);
+    raise EJsonParserException.CreateResFmt(@RsUnexpectedEndOfFile, [JsonTokenKindToStr[TokenKind]], FLineNum, Col, Position);
+  raise EJsonParserException.CreateResFmt(@RsUnexpectedToken, [JsonTokenKindToStr[TokenKind], JsonTokenKindToStr[FLook.Kind]], FLineNum, Col, Position);
 end;
 
 procedure TJsonReader.Accept(TokenKind: TJsonTokenKind);
@@ -2609,158 +2827,6 @@ begin
   end;
 end;
 
-class procedure TJsonBaseObject.JSONStrToStr(P, EndP: PChar; FirstEscapeIndex: Integer; var S: string);
-const
-  MaxBufPos = 127;
-var
-  Buf: array[0..MaxBufPos] of Char;
-  F: PChar;
-  BufPos, Len: Integer;
-begin
-  Dec(FirstEscapeIndex);
-
-  if FirstEscapeIndex > 0 then
-  begin
-    SetString(S, P, FirstEscapeIndex);
-    Inc(P, FirstEscapeIndex);
-  end
-  else
-    S := '';
-
-  while True do
-  begin
-    BufPos := 0;
-    while (P < EndP) and (P^ = '\') do
-    begin
-      Inc(P);
-      if P = EndP then // broken escaped character
-        Break;
-      case P^ of
-        '"': Buf[BufPos] := '"';
-        '\': Buf[BufPos] := '\';
-        '/': Buf[BufPos] := '/';
-        'b': Buf[BufPos] := #8;
-        'f': Buf[BufPos] := #12;
-        'n': Buf[BufPos] := #10;
-        'r': Buf[BufPos] := #13;
-        't': Buf[BufPos] := #9;
-        'u':
-          begin
-            Inc(P);
-            if P + 3 >= EndP then
-              Break;
-            Buf[BufPos] := Char(GetHexDigits(P, 4));
-            Inc(P, 3);
-          end;
-      else
-        Break;
-      end;
-      Inc(P);
-
-      Inc(BufPos);
-      if BufPos > MaxBufPos then
-      begin
-        Len := Length(S);
-        SetLength(S, Len + BufPos);
-        Move(Buf[0], PChar(Pointer(S))[Len], BufPos * SizeOf(Char));
-        BufPos := 0;
-      end;
-    end;
-    // append remaining buffer
-    if BufPos > 0 then
-    begin
-      Len := Length(S);
-      SetLength(S, Len + BufPos);
-      Move(Buf[0], PChar(Pointer(S))[Len], BufPos * SizeOf(Char));
-    end;
-
-    // fast forward
-    F := P;
-    while (P < EndP) and (P^ <> '\') do
-      Inc(P);
-    if P > F then
-      AppendString(S, F, P - F);
-    if P >= EndP then
-      Break;
-  end;
-end;
-
-class procedure TJsonBaseObject.JSONUtf8StrToStr(P, EndP: PByte; FirstEscapeIndex: Integer; var S: string);
-const
-  MaxBufPos = 127;
-var
-  Buf: array[0..MaxBufPos] of Char;
-  F: PByte;
-  BufPos, Len: Integer;
-begin
-  Dec(FirstEscapeIndex);
-
-  if FirstEscapeIndex > 0 then
-  begin
-    SetStringUtf8(S, P, FirstEscapeIndex);
-    Inc(P, FirstEscapeIndex);
-  end
-  else
-    S := '';
-
-  while True do
-  begin
-    BufPos := 0;
-    while (P < EndP) and (P^ = Byte(Ord('\'))) do
-    begin
-      Inc(P);
-      if P = EndP then // broken escaped character
-        Break;
-      case P^ of
-        Ord('"'): Buf[BufPos] := '"';
-        Ord('\'): Buf[BufPos] := '\';
-        Ord('/'): Buf[BufPos] := '/';
-        Ord('b'): Buf[BufPos] := #8;
-        Ord('f'): Buf[BufPos] := #12;
-        Ord('n'): Buf[BufPos] := #10;
-        Ord('r'): Buf[BufPos] := #13;
-        Ord('t'): Buf[BufPos] := #9;
-        Ord('u'):
-          begin
-            Inc(P);
-            if P + 3 >= EndP then
-              Break;
-            Buf[BufPos] := Char(GetHexDigitsUtf8(P, 4));
-            Inc(P, 3);
-          end;
-      else
-        Break;
-      end;
-      Inc(P);
-
-      Inc(BufPos);
-      if BufPos > MaxBufPos then
-      begin
-        Len := Length(S);
-        SetLength(S, Len + BufPos);
-        Move(Buf[0], PChar(Pointer(S))[Len], BufPos * SizeOf(Char));
-        BufPos := 0;
-      end;
-    end;
-    // append remaining buffer
-    if BufPos > 0 then
-    begin
-      Len := Length(S);
-      SetLength(S, Len + BufPos);
-      Move(Buf[0], PChar(Pointer(S))[Len], BufPos * SizeOf(Char));
-    end;
-
-    // fast forward
-    F := P;
-    while (P < EndP) and (P^ <> Byte(Ord('\'))) do
-      Inc(P);
-    if P > F then
-      AppendStringUtf8(S, F, P - F);
-    if P >= EndP then
-      Break;
-  end;
-end;
-
 {$IFNDEF NEXTGEN}
 class function TJsonBaseObject.ParseUtf8(const S: UTF8String{$IFDEF SUPPORT_PROGRESS}; AProgress: PJsonReaderProgressRec{$ENDIF}): TJsonBaseObject;
 begin
@@ -2774,6 +2840,9 @@ end;
 {$ENDIF ~NEXTGEN}
 
 class function TJsonBaseObject.ParseUtf8Bytes(S: PByte; Len: Integer{$IFDEF SUPPORT_PROGRESS}; AProgress: PJsonReaderProgressRec{$ENDIF}): TJsonBaseObject;
+var
+  P: PByte;
+  L: Integer;
 begin
   if (S = nil) or (Len = 0) then
     Result := nil
@@ -2787,16 +2856,18 @@ begin
       Len := StrLen(PAnsiChar(S));
       {$ENDIF ~NEXTGEN}
     end;
-    while (Len > 0) and (S^ <= 32) do
+    P := S;
+    L := Len;
+    while (L > 0) and (P^ <= 32) do
     begin
-      Inc(S);
-      Dec(Len);
+      Inc(P);
+      Dec(L);
     end;
-    if Len = 0 then
+    if L = 0 then
       Result := nil
     else
     begin
-      if (Len > 0) and (S^ = Byte(Ord('['))) then
+      if (L > 0) and (P^ = Byte(Ord('['))) then
         Result := TJsonArray.Create
       else
         Result := TJsonObject.Create;
@@ -2821,6 +2892,9 @@ begin
 end;
 
 class function TJsonBaseObject.Parse(S: PWideChar; Len: Integer{$IFDEF SUPPORT_PROGRESS}; AProgress: PJsonReaderProgressRec{$ENDIF}): TJsonBaseObject;
+var
+  P: PWideChar;
+  L: Integer;
 begin
   if (S = nil) or (Len = 0) then
     Result := nil
@@ -2828,16 +2902,18 @@ begin
   begin
     if Len < 0 then
       Len := StrLen(S);
-    while (Len > 0) and (S^ <= #32) do
+    P := S;
+    L := Len;
+    while (L > 0) and (P^ <= #32) do
     begin
-      Inc(S);
-      Dec(Len);
+      Inc(P);
+      Dec(L);
     end;
-    if Len = 0 then
+    if L = 0 then
       Result := nil
     else
     begin
-      if (Len > 0) and (S^ = '[') then
+      if (L > 0) and (P^ = '[') then
         Result := TJsonArray.Create
       else
         Result := TJsonObject.Create;
@@ -5451,20 +5527,60 @@ end;
 
 constructor TUtf8JsonReader.Create(S: PByte; Len: NativeInt{$IFDEF SUPPORT_PROGRESS}; AProgress: PJsonReaderProgressRec{$ENDIF});
 begin
-  inherited Create({$IFDEF SUPPORT_PROGRESS}PByte(S), Len * SizeOf(Byte), AProgress{$ENDIF});
+  inherited Create(S, {$IFDEF SUPPORT_PROGRESS}Len * SizeOf(Byte), AProgress{$ENDIF});
   FText := S;
   FTextEnd := S + Len;
 end;
 
+function TUtf8JsonReader.GetCharOffset(StartPos: Pointer): NativeInt;
+begin
+  Result := FText - PByte(StartPos);
+end;
+
 function TUtf8JsonReader.Next: Boolean;
+label
+  EndReached;
 var
   P, EndP: PByte;
+  Ch: Byte;
 begin
   P := FText;
   EndP := FTextEnd;
-  while (P < EndP) and (P^ <= 32) do
-    Inc(P);
+  Ch := 0; // silence compiler warning
+  while True do
+  begin
+    while True do
+    begin
+      if P = EndP then
+        goto EndReached; // use GOTO to eliminate doing the "P = EndP", "P < EndP" 3 times - wish there was a "Break loop-label;"
+      Ch := P^;
+      if Ch > 32 then
+        Break;
+      if not (Ch in [9, 32]) then
+        Break;
+      Inc(P);
+    end;
 
+    case Ch of
+      10:
+        begin
+          FLineStart := P + 1;
+          Inc(FLineNum);
+        end;
+      13:
+        begin
+          Inc(FLineNum);
+          if (P + 1 < EndP) and (P[1] = 10) then
+            Inc(P);
+          FLineStart := P + 1;
+        end;
+    else
+      Break;
+    end;
+    Inc(P);
+  end;
+
+EndReached:
   if P < EndP then
   begin
     case P^ of
@@ -5553,7 +5669,7 @@ begin
     if Idx = 0 then
       Break;
     Ch := EndP[Idx];
-    if Ch = Byte(Ord('"')) then
+    if (Ch = Byte(Ord('"'))) or (Ch = 10) or (Ch = 13) then
       Break;
     Inc(Idx);
     if Ch <> Byte(Ord('\')) then
@@ -5565,16 +5681,25 @@ begin
     Inc(Idx);
   until False;
 
+  if Idx = 0 then
+  begin
+    FText := P - 1;
+    TJsonReader.StringNotClosedError(Self);
+  end;
+
   EndP := @EndP[Idx];
   if EscapeSequences = nil then
     SetStringUtf8(FLook.S, P, EndP - P)
   else
-    TJsonBaseObject.JSONUtf8StrToStr(P, EndP, EscapeSequences - P, FLook.S);
+    TUtf8JsonReader.JSONUtf8StrToStr(P, EndP, EscapeSequences - P, FLook.S, Self);
 
   if Ch = Byte(Ord('"')) then
     Inc(EndP);
   FLook.Kind := jtkString;
   FText := EndP;
+
+  if Ch in [10, 13] then
+    TJsonReader.InvalidStringCharacterError(Self);
 end;
 
 {$IFDEF CPUX64}
@@ -5961,11 +6086,16 @@ end;
 
 { TStringJsonReader }
 
-constructor TStringJsonReader.Create(const S: PChar; Len: Integer{$IFDEF SUPPORT_PROGRESS}; AProgress: PJsonReaderProgressRec{$ENDIF});
+constructor TStringJsonReader.Create(S: PChar; Len: Integer{$IFDEF SUPPORT_PROGRESS}; AProgress: PJsonReaderProgressRec{$ENDIF});
 begin
-  inherited Create({$IFDEF SUPPORT_PROGRESS}S, Len * SizeOf(WideChar), AProgress{$ENDIF});
+  inherited Create(S, {$IFDEF SUPPORT_PROGRESS}Len * SizeOf(WideChar), AProgress{$ENDIF});
   FText := S;
   FTextEnd := S + Len;
+end;
+
+function TStringJsonReader.GetCharOffset(StartPos: Pointer): NativeInt;
+begin
+  Result := FText - PChar(StartPos);
 end;
 
 function TStringJsonReader.Next: Boolean;
@@ -6065,7 +6195,7 @@ begin
     if Idx = 0 then
       Break;
     Ch := EndP[Idx];
-    if Ch = '"' then
+    if (Ch = '"') or (Ch = #10) or (Ch = #13) then
       Break;
     Inc(Idx);
     if Ch <> '\' then
@@ -6077,16 +6207,25 @@ begin
     Inc(Idx);
   until False;
 
+  if Idx = 0 then
+  begin
+    FText := P - 1;
+    TJsonReader.StringNotClosedError(Self);
+  end;
+
   EndP := @EndP[Idx];
   if EscapeSequences = nil then
     SetString(FLook.S, P, EndP - P)
   else
-    TJsonBaseObject.JSONStrToStr(P, EndP, EscapeSequences - P, FLook.S);
+    TJsonReader.JSONStrToStr(P, EndP, EscapeSequences - P, FLook.S, Self);
 
   if Ch = '"' then
     Inc(EndP);
   FLook.Kind := jtkString;
   FText := EndP;
+
+  if Ch in [#10, #13] then
+    TJsonReader.InvalidStringCharacterError(Self);
 end;
 
 {$IFDEF CPUX64}
