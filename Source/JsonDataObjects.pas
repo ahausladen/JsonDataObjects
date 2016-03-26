@@ -963,7 +963,7 @@ type
     procedure FreeInstance; override;
     {$ENDIF USE_FAST_NEWINSTANCE}
 
-    constructor Create(AStart: Pointer; {$IFDEF SUPPORT_PROGRESS}ASize: NativeInt; AProgress: PJsonReaderProgressRec{$ENDIF});
+    constructor Create(AStart: Pointer{$IFDEF SUPPORT_PROGRESS}; ASize: NativeInt; AProgress: PJsonReaderProgressRec{$ENDIF});
     destructor Destroy; override;
     procedure Parse(Data: TJsonBaseObject);
   end;
@@ -1523,7 +1523,7 @@ begin
 end;
 {$ENDIF ~USE_FAST_NEWINSTANCE}
 
-constructor TJsonReader.Create(AStart: Pointer; {$IFDEF SUPPORT_PROGRESS}ASize: NativeInt; AProgress: PJsonReaderProgressRec{$ENDIF});
+constructor TJsonReader.Create(AStart: Pointer{$IFDEF SUPPORT_PROGRESS}; ASize: NativeInt; AProgress: PJsonReaderProgressRec{$ENDIF});
 begin
   //inherited Create;
   {$IFDEF USE_FAST_NEWINSTANCE}
@@ -5527,7 +5527,7 @@ end;
 
 constructor TUtf8JsonReader.Create(S: PByte; Len: NativeInt{$IFDEF SUPPORT_PROGRESS}; AProgress: PJsonReaderProgressRec{$ENDIF});
 begin
-  inherited Create(S, {$IFDEF SUPPORT_PROGRESS}Len * SizeOf(Byte), AProgress{$ENDIF});
+  inherited Create(S{$IFDEF SUPPORT_PROGRESS}, Len * SizeOf(Byte), AProgress{$ENDIF});
   FText := S;
   FTextEnd := S + Len;
 end;
@@ -6088,7 +6088,7 @@ end;
 
 constructor TStringJsonReader.Create(S: PChar; Len: Integer{$IFDEF SUPPORT_PROGRESS}; AProgress: PJsonReaderProgressRec{$ENDIF});
 begin
-  inherited Create(S, {$IFDEF SUPPORT_PROGRESS}Len * SizeOf(WideChar), AProgress{$ENDIF});
+  inherited Create(S{$IFDEF SUPPORT_PROGRESS}, Len * SizeOf(WideChar), AProgress{$ENDIF});
   FText := S;
   FTextEnd := S + Len;
 end;
