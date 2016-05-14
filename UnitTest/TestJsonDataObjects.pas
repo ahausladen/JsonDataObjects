@@ -1,5 +1,13 @@
 unit TestJsonDataObjects;
 
+{$IFDEF NEXTGEN}
+  {$IF CompilerVersion >= 31.0} // 10.1 Berlin or newer
+    {$DEFINE SUPPORTS_UTF8STRING} // Delphi 10.1 Berlin supports UTF8String for mobile compilers
+  {$IFEND}
+{$ELSE}
+  {$DEFINE SUPPORTS_UTF8STRING}
+{$ENDIF}
+
 interface
 
 uses
@@ -52,7 +60,9 @@ type
     procedure TestToString;
     procedure TestDateTimeToJSON;
     procedure TestEmptyString;
+    {$IFDEF SUPPORTS_UTF8STRING}
     procedure TestToUTF8JSON;
+    {$ENDIF SUPPORTS_UTF8STRING}
     procedure TestInt64MaxIntX2;
     procedure TestVariant;
     procedure TestVariantNull;
@@ -1214,6 +1224,7 @@ begin
   end;
 end;
 
+{$IFDEF SUPPORTS_UTF8STRING}
 procedure TestTJsonBaseObject.TestToUTF8JSON;
 var
   B: TJsonBaseObject;
@@ -1294,6 +1305,7 @@ begin
     B.Free;
   end;
 end;
+{$ENDIF SUPPORTS_UTF8STRING}
 
 procedure TestTJsonBaseObject.TestInt64MaxIntX2;
 var
@@ -1528,11 +1540,15 @@ var
   Json: TJsonObject;
   Progress: TJsonReaderProgressRec;
   I: Integer;
-  LargeJson: UTF8String;
+  LargeJson: {$IFDEF SUPPORTS_UTF8STRING}UTF8String{$ELSE}TBytes{$ENDIF};
 begin
   // Call Progress if byte position changed
   FProgressSteps := nil;
+  {$IFDEF SUPPORTS_UTF8STRING}
   Json := TJDOJsonArray.ParseUtf8(S, Progress.Init(JsonProgress, Self, 1)) as TJsonObject;
+  {$ELSE}
+  Json := TJDOJsonArray.Parse(S, Progress.Init(JsonProgress, Self, 1)) as TJsonObject;
+  {$ENDIF SUPPORTS_UTF8STRING}
   try
     CheckTrue(Length(FProgressSteps) > 2);
 
@@ -1549,14 +1565,22 @@ begin
 
     for I := 0 to 100000 do
       Json.A['MyArray'].Add('Index: ' + IntToStr(I));
+    {$IFDEF SUPPORTS_UTF8STRING}
     LargeJson := Json.ToUtf8JSON();
+    {$ELSE}
+    Json.ToUtf8JSON(LargeJson);
+    {$ENDIF SUPPORTS_UTF8STRING}
   finally
     Json.Free;
   end;
 
   // Call Progress only if percentage changed
   FProgressSteps := nil;
+  {$IFDEF SUPPORTS_UTF8STRING}
   Json := TJDOJsonArray.ParseUtf8(LargeJson, Progress.Init(JsonProgress, Self)) as TJsonObject;
+  {$ELSE}
+  Json := TJDOJsonArray.Parse(LargeJson, TEncoding.UTF8, 0, -1, Progress.Init(JsonProgress, Self)) as TJsonObject;
+  {$ENDIF SUPPORTS_UTF8STRING}
   try
     CheckTrue(Length(FProgressSteps) > 2);
     CheckEquals(100 + 1, Length(FProgressSteps)); // 0, 1, 2, ..., 99, 100
