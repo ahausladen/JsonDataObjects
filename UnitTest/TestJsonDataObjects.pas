@@ -115,6 +115,11 @@ type
 
 implementation
 
+function CompareFloatRel(Expected, Actual: Extended; RelativeError: Extended = 0.0000001): Boolean;
+begin
+  Result := (Expected = Actual) or (Abs((Actual - Expected) / Expected) < RelativeError);
+end;
+
 { TestTJsonBaseObject }
 
 procedure TestTJsonBaseObject.SetUp;
@@ -1391,8 +1396,8 @@ begin
     Check(O['Key'].VariantValue = 123, 'Int to Variant');
     Check(O['Bool'].VariantValue = True, 'Boolean to Variant');
     Check(O['Null'].VariantValue = Null, 'null to Variant');
-    Check(CompareFloatRelative(O['Float'].VariantValue, -1.234567890E10), 'Float to Variant');
-    Check(CompareFloatRelative(O['DateTime'].VariantValue, TJsonBaseObject.JSONToDateTime('2014-12-31T23:59:59.999Z')), 'DateTime to Variant');
+    Check(CompareFloatRel(O['Float'].VariantValue, -1.234567890E10), 'Float to Variant');
+    Check(CompareFloatRel(O['DateTime'].VariantValue, TJsonBaseObject.JSONToDateTime('2014-12-31T23:59:59.999Z')), 'DateTime to Variant');
     Check(O['Int64'].VariantValue = 1234567890123456789, 'Int64 to Variant');
 
     CheckException(ObjectToVariantException, EJsonCastException, 'Object to Variant exception');
@@ -1417,12 +1422,12 @@ begin
     V := -1.2;
     O['Key'] := V;
     Check(O['Key'].Typ = jdtFloat);
-    Check(CompareFloatRelative(-1.2, O['Key']), 'Variant to Float');
+    Check(CompareFloatRel(-1.2, O['Key']), 'Variant to Float');
 
     V := TJsonBaseObject.JSONToDateTime('2014-12-31T23:59:59.999Z');
     O['Key'] := V;
     Check(O['Key'].Typ = jdtDateTime);
-    Check(CompareFloatRelative(TJsonBaseObject.JSONToDateTime('2014-12-31T23:59:59.999Z'), O['Key']), 'Variant to DateTime');
+    Check(CompareFloatRel(TJsonBaseObject.JSONToDateTime('2014-12-31T23:59:59.999Z'), O['Key']), 'Variant to DateTime');
 
     V := True;
     O['Key'] := V;
