@@ -734,7 +734,7 @@ type
     procedure ToSimpleObject(AObject: TObject; ACaseSensitive: Boolean = True);
     // FromSimpleObject() clears the JSON object and adds the Delphi object's properties.
     // The object's class must be compiled with the $M+ compiler switch or derive from TPersistent.
-    procedure FromSimpleObject(AObject: TObject);
+    procedure FromSimpleObject(AObject: TObject; ALowerCamelCase: Boolean = False);
 
     procedure Clear;
     procedure Remove(const Name: string);
@@ -1138,6 +1138,11 @@ end;
 //end;
   {$ENDIF DEBUG}
 {$ENDIF USE_FAST_STRASG_FOR_INTERNAL_STRINGS}
+
+procedure AnsiLowerCamelCaseString(var S: string);
+begin
+  S := AnsiLowerCase(PChar(S)^) + Copy(S, 2);
+end;
 
 {$IF not declared(TryStrToUInt64)}
 function TryStrToUInt64(const S: string; out Value: UInt64): Boolean;
@@ -4727,7 +4732,7 @@ begin
   end;
 end;
 
-procedure TJsonObject.FromSimpleObject(AObject: TObject);
+procedure TJsonObject.FromSimpleObject(AObject: TObject; ALowerCamelCase: Boolean);
 var
   Index, Count: Integer;
   PropList: PPropList;
@@ -4735,6 +4740,7 @@ var
   PropName: string;
   V: Variant;
   D: Double;
+  Ch: Char;
 begin
   Clear;
   if AObject = nil then
@@ -4751,6 +4757,20 @@ begin
         if (PropList[Index].StoredProc = Pointer($1)) or IsStoredProp(AObject, PropList[Index]) then
         begin
           PropName := UTF8ToString(PropList[Index].Name);
+          if ALowerCamelCase and (PropName <> '') then
+          begin
+            Ch := PChar(Pointer(PropName))^;
+            if Ord(Ch) < 128 then
+            begin
+              case Ch of
+                'A'..'Z':
+                  PChar(Pointer(PropName))^ := Char(Ord(Ch) xor $20);
+              end;
+            end
+            else // Delphi 2005+ compilers allow unicode identifiers, even if that is a very bad idea
+              AnsiLowerCamelCaseString(PropName);
+          end;
+
           case PropList[Index].PropType^.Kind of
             tkInteger, tkChar, tkWChar:
               InternAdd(PropName, GetOrdProp(AObject, PropList[Index]));

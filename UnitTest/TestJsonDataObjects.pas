@@ -108,6 +108,7 @@ type
     procedure TestObjectAssign;
     procedure TestToSimpleObject;
     procedure TestFromSimpleObject;
+    procedure TestFromSimpleObjectLowerCamelCase;
     procedure TestPathAccess;
     procedure TestExtract;
     procedure TestEnumerator;
@@ -2342,6 +2343,57 @@ begin
       CheckEquals(dt, O.D['MyExtraDateTime']);
       CheckEquals('12.2', O.S['MyVariant']);
       CheckFalse(O.Contains('NotStored'), 'Contains(''NonStrored''');
+    finally
+      Obj.Free;
+    end;
+  finally
+    O.Free;
+  end;
+end;
+
+type
+  TMyLowerCamelCaseObject = class(TPersistent)
+  private
+    FLowerCase: string;
+    FAenderung: string;
+    FNoCase: Boolean;
+  published
+    property _NoCase: Boolean read FNoCase write FNoCase;
+    property LowerCase: string read FLowerCase write FLowerCase;
+    {$IFDEF UNICODE} // Delphi 2005+ compilers allow unicode identifiers, even if that is a very bad idea
+    property Änderung: string read FAenderung write FAenderung;
+    {$ENDIF UNICODE}
+  end;
+
+procedure TestTJsonObject.TestFromSimpleObjectLowerCamelCase;
+var
+  O: TJsonObject;
+  Obj: TMyLowerCamelCaseObject;
+begin
+  O := TJsonObject.Create;
+  try
+
+    Obj := TMyLowerCamelCaseObject.Create;
+    try
+      Obj._NoCase := True;
+      Obj.LowerCase := 'LowerCase';
+      {$IFDEF UNICODE} // Delphi 2005+ compilers allow unicode identifiers, even if that is a very bad idea
+      Obj.Änderung := 'Änderung';
+      {$ENDIF UNICODE}
+
+      O.FromSimpleObject(Obj, True);
+
+      {$IFDEF UNICODE}
+      CheckEquals(3, O.Count);
+      {$ELSE}
+      CheckEquals(2, O.Count);
+      {$ENDIF UNICODE}
+
+      CheckEqualsString('_NoCase', O.Names[0]);
+      CheckEqualsString('lowerCase', O.Names[1]);
+      {$IFDEF UNICODE}
+      CheckEqualsString('änderung', O.Names[2]);
+      {$ENDIF UNICODE}
     finally
       Obj.Free;
     end;
