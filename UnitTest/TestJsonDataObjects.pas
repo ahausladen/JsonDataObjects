@@ -1211,6 +1211,15 @@ begin
     Dt := TJsonBaseObject.JSONToDateTime(S);
     CheckEquals(ExpectDt, Dt, 'expected datetime: ' + DateTimeToStr(ExpectDt) + ', returned: ' + DateTimeToStr(Dt));
 
+  ExpectDt := EncodeDate(2016, 9, 29);
+    S := TJsonBaseObject.DateTimeToJSON(ExpectDt, False);
+    Dt := TJsonBaseObject.JSONToDateTime(S);
+    CheckEquals(ExpectDt, Dt, 'expected datetime: ' + DateTimeToStr(ExpectDt) + ', returned: ' + DateTimeToStr(Dt));
+
+    S := TJsonBaseObject.DateTimeToJSON(ExpectDt, True);
+    Dt := TJsonBaseObject.JSONToDateTime(S);
+    CheckEquals(ExpectDt, Dt, 'expected datetime: ' + DateTimeToStr(ExpectDt) + ', returned: ' + DateTimeToStr(Dt));
+
   TJsonBaseObject.JSONToDateTime('2009-01-01T12:00:00+01:00');
   TJsonBaseObject.JSONToDateTime('2009-01-01T12:00:00+0100');
   TJsonBaseObject.JSONToDateTime('2015-02-14T22:58+01:00');
