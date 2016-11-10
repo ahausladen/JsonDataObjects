@@ -1114,6 +1114,8 @@ begin
   FLineNum := ALineNum;
   FColumn := AColumn;
   FPosition := APosition;
+  if FLineNum > 0 then
+    Message := Format('%s (%d, %d)', [Message, FLineNum, FColumn]);
 end;
 
 constructor EJsonParserException.CreateRes(ResStringRec: PResStringRec; ALineNum, AColumn, APosition: NativeInt);
@@ -1122,6 +1124,8 @@ begin
   FLineNum := ALineNum;
   FColumn := AColumn;
   FPosition := APosition;
+  if FLineNum > 0 then
+    Message := Format('%s (%d, %d)', [Message, FLineNum, FColumn]);
 end;
 
 procedure ListError(Msg: PResStringRec; Data: Integer);
