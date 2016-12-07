@@ -783,6 +783,10 @@ type
     NullConvertsToValueTypes: Boolean;
   end;
 
+  TJsonDeserializationConfig = record
+    IgnoreTimezone: Boolean;
+  end;
+
   // Rename classes because RTL classes have the same name
   TJDOJsonBaseObject = TJsonBaseObject;
   TJDOJsonObject = TJsonObject;
@@ -794,6 +798,9 @@ var
     IndentChar: #9;
     UseUtcTime: True;
     NullConvertsToValueTypes: False;  // If True and an object is nil/null, a convertion to String, Int, Long, Float, DateTime, Boolean will return ''/0/False
+  );
+  JsonDeserializationConfig: TJsonDeserializationConfig = ( // not thread-safe
+    IgnoreTimezone: False;
   );
 
 implementation
@@ -1457,7 +1464,7 @@ begin
           P := ParseDateTimePart(P + 1, MSec, 3);
       end;
       Result := Result + EncodeTime(Hour, Min, Sec, MSec);
-      if P^ <> 'Z' then
+      if (P^ <> 'Z') and not JsonDeserializationConfig.IgnoreTimezone then
       begin
         if (P^ = '+') or (P^ = '-') then
         begin
@@ -1479,7 +1486,8 @@ begin
           Exit;
         end;
       end;
-      Result := UtcDateTimeToLocalDateTime(Result);
+      if not JsonDeserializationConfig.IgnoreTimezone then
+        Result := UtcDateTimeToLocalDateTime(Result);
     end;
   end;
 end;
