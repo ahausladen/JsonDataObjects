@@ -55,6 +55,18 @@ unit JsonDataObjects;
   {$DEFINE SUPPORTS_UTF8STRING}
 {$ENDIF}
 
+{$IFDEF CPUX64}
+  {$IFNDEF LINUX64} // Linux 64 compiler doesn't support ASM for x64 code => LLVM
+    {$DEFINE ASMSUPPORT}
+  {$ENDIF ~LINUX64}
+{$ENDIF CPUX64}
+{$IFDEF CPUX86}
+  {$DEFINE ASMSUPPORT}
+{$ENDIF CPUX86}
+{$IFDEF EXTERNALLINKER} // implicates LLVM
+  {$UNDEF ASMSUPPORT}
+{$ENDIF EXTERNALLINKER}
+
 // Enables the progress callback feature
 {$DEFINE SUPPORT_PROGRESS}
 
@@ -5773,7 +5785,8 @@ begin
     TJsonReader.InvalidStringCharacterError(Self);
 end;
 
-{$IFDEF CPUX64}
+{$IFDEF ASMSUPPORT}
+  {$IFDEF CPUX64}
 function ParseUInt64Utf8(P, EndP: PByte): UInt64;
 // RCX = P
 // RDX = EndP
@@ -5808,7 +5821,7 @@ asm
 @@LeaveFail:
   xor rax, rax
 end;
-{$ELSE}
+  {$ENDIF CPUX64}
   {$IFDEF CPUX86}
 function ParseUInt64Utf8(P, EndP: PByte): UInt64;
 asm
@@ -5862,7 +5875,8 @@ asm
   xor eax, eax
   xor edx, edx
 end;
-  {$ELSE}
+  {$ENDIF CPUX86}
+{$ELSE}
 function ParseUInt64Utf8(P, EndP: PByte): UInt64;
 begin
   if P = EndP then
@@ -5878,8 +5892,7 @@ begin
     end;
   end;
 end;
-  {$ENDIF CPUX86}
-{$ENDIF CPUX64}
+{$ENDIF ASMSUPPORT}
 
 function ParseAsDoubleUtf8(F, P: PByte): Double;
 begin
@@ -6299,7 +6312,8 @@ begin
     TJsonReader.InvalidStringCharacterError(Self);
 end;
 
-{$IFDEF CPUX64}
+{$IFDEF ASMSUPPORT}
+  {$IFDEF CPUX64}
 function ParseUInt64(P, EndP: PWideChar): UInt64;
 // RCX = P
 // RDX = EndP
@@ -6334,7 +6348,7 @@ asm
 @@LeaveFail:
   xor rax, rax
 end;
-{$ELSE}
+  {$ENDIF CPUX64}
   {$IFDEF CPUX86}
 function ParseUInt64(P, EndP: PWideChar): UInt64;
 asm
@@ -6388,7 +6402,8 @@ asm
   xor eax, eax
   xor edx, edx
 end;
-  {$ELSE}
+  {$ENDIF CPUX86}
+{$ELSE}
 function ParseUInt64(P, EndP: PWideChar): UInt64;
 begin
   if P = EndP then
@@ -6404,8 +6419,7 @@ begin
     end;
   end;
 end;
-  {$ENDIF CPUX86}
-{$ENDIF CPUX64}
+{$ENDIF ASMSUPPORT}
 
 function ParseAsDouble(F, P: PWideChar): Double;
 begin
