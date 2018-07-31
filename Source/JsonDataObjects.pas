@@ -7629,13 +7629,18 @@ begin
     // Release the unused memory and terminate the string with a #0. The result is that we have a
     // native string that is exactly the same as if it was allocated by System.@NewUnicodeString.
     StrP := PStrRec(PByte(FData) - SizeOf(TStrRec));
-    if Len <> FCapacity then
-      ReallocMem(Pointer(StrP), SizeOf(TStrRec) + (Len + 1) * SizeOf(Char)); // allocate +1 char for the #0
-    // Set the string's length
-    StrP.Length := Len;
-    P := PChar(PByte(StrP) + SizeOf(TStrRec));
-    P[Len] := #0;
-    Pointer(S) := P; // keep the RefCnt=1
+    if Len = 0 then
+      FreeMem(StrP)
+    else
+    begin
+      if Len <> FCapacity then
+        ReallocMem(Pointer(StrP), SizeOf(TStrRec) + (Len + 1) * SizeOf(Char)); // allocate +1 char for the #0
+      // Set the string's length
+      StrP.Length := Len;
+      P := PChar(PByte(StrP) + SizeOf(TStrRec));
+      P[Len] := #0;
+      Pointer(S) := P; // keep the RefCnt=1
+    end;
   end;
 end;
 
