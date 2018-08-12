@@ -257,6 +257,23 @@ type
     jdtNone, jdtString, jdtInt, jdtLong, jdtULong, jdtFloat, jdtDateTime, jdtBool, jdtArray, jdtObject
   );
 
+  TDateTimeTZ = record
+  public
+    OrgTime: TDateTime;
+    OffsetHours: SmallInt;
+    OffsetMinutes: Word;
+    constructor Create(Value: TDateTime); overload;
+    constructor Create(Value: TDateTime; OffsetHours: SmallInt; OffsetMinutes: Word = 0); overload;
+    class operator Implicit(const Value: TDateTimeTZ): TDateTime; overload;
+    class operator Implicit(const Value: TDateTime): TDateTimeTZ; overload;
+    class operator Equal(a, b: TDateTimeTZ): Boolean;
+    class operator NotEqual(a, b: TDateTimeTZ): Boolean;
+
+    function LocalTime: TDateTime; inline;
+    function RemoteTime(AOffsetHours: SmallInt; AOffsetMinutes: Word = 0): TDateTime; inline;
+    function UTCTime: TDateTime; inline;
+  end;
+
   // TJsonDataValue holds the actual value
   PJsonDataValue = ^TJsonDataValue;
   TJsonDataValue = packed record
@@ -271,7 +288,7 @@ type
         jdtLong: (L: Int64);
         jdtULong: (U: UInt64);
         jdtFloat: (F: Double);
-        jdtDateTime: (D: TDateTime);
+        jdtDateTime: (D: TDateTimeTZ);
         jdtBool: (B: Boolean);
         jdtArray: (A: Pointer);  // owned by TJsonDataValue
         jdtObject: (O: Pointer); // owned by TJsonDataValue
@@ -285,6 +302,7 @@ type
     function GetULongValue: UInt64;
     function GetFloatValue: Double;
     function GetDateTimeValue: TDateTime;
+    function GetDateTimeTZValue: TDateTimeTZ;
     function GetBoolValue: Boolean;
     function GetArrayValue: TJsonArray;
     function GetObjectValue: TJsonObject;
@@ -296,6 +314,7 @@ type
     procedure SetULongValue(const AValue: UInt64);
     procedure SetFloatValue(const AValue: Double);
     procedure SetDateTimeValue(const AValue: TDateTime);
+    procedure SetDateTimeTZValue(const AValue: TDateTimeTZ);
     procedure SetBoolValue(const AValue: Boolean);
     procedure SetArrayValue(const AValue: TJsonArray);
     procedure SetObjectValue(const AValue: TJsonObject);
@@ -318,6 +337,7 @@ type
     property ULongValue: UInt64 read GetULongValue write SetULongValue;
     property FloatValue: Double read GetFloatValue write SetFloatValue;
     property DateTimeValue: TDateTime read GetDateTimeValue write SetDateTimeValue;
+    property DateTimeTZValue: TDateTimeTZ read GetDateTimeTZValue write SetDateTimeTZValue;
     property BoolValue: Boolean read GetBoolValue write SetBoolValue;
     property ArrayValue: TJsonArray read GetArrayValue write SetArrayValue;
     property ObjectValue: TJsonObject read GetObjectValue write SetObjectValue;
@@ -334,6 +354,7 @@ type
     function GetULongValue: UInt64; //inline;  no implicit operator due to conflict with Int64
     function GetFloatValue: Double; inline;
     function GetDateTimeValue: TDateTime; inline;
+    function GetDateTimeTZValue: TDateTimeTZ; inline;
     function GetBoolValue: Boolean; inline;
     function GetArrayValue: TJsonArray; inline;
     function GetObjectValue: TJsonObject; inline;
@@ -345,6 +366,7 @@ type
     procedure SetULongValue(const Value: UInt64);
     procedure SetFloatValue(const Value: Double);
     procedure SetDateTimeValue(const Value: TDateTime);
+    procedure SetDateTimeTZValue(const Value: TDateTimeTZ);
     procedure SetBoolValue(const Value: Boolean);
     procedure SetArrayValue(const Value: TJsonArray);
     procedure SetObjectValue(const Value: TJsonObject);
@@ -359,6 +381,7 @@ type
     function GetObjectULong(const Name: string): UInt64; inline;
     function GetObjectFloat(const Name: string): Double; inline;
     function GetObjectDateTime(const Name: string): TDateTime; inline;
+    function GetObjectDateTimeTZ(const Name: string): TDateTimeTZ; inline;
     function GetObjectBool(const Name: string): Boolean; inline;
     function GetArray(const Name: string): TJsonArray; inline;
     function GetObject(const Name: string): TJsonDataValueHelper; inline;
@@ -369,6 +392,7 @@ type
     procedure SetObjectULong(const Name: string; const Value: UInt64); inline;
     procedure SetObjectFloat(const Name: string; const Value: Double); inline;
     procedure SetObjectDateTime(const Name: string; const Value: TDateTime); inline;
+    procedure SetObjectDateTimeTZ(const Name: string; const Value: TDateTimeTZ); inline;
     procedure SetObjectBool(const Name: string; const Value: Boolean); inline;
     procedure SetArray(const Name: string; const Value: TJsonArray); inline;
     procedure SetObject(const Name: string; const Value: TJsonDataValueHelper); inline;
@@ -394,7 +418,9 @@ type
     class operator Implicit(const Value: Extended): TJsonDataValueHelper; overload;
     class operator Implicit(const Value: TJsonDataValueHelper): Extended; overload;
     class operator Implicit(const Value: TDateTime): TJsonDataValueHelper; overload;
+    class operator Implicit(const Value: TDateTimeTZ): TJsonDataValueHelper; overload;
     class operator Implicit(const Value: TJsonDataValueHelper): TDateTime; overload;
+    class operator Implicit(const Value: TJsonDataValueHelper): TDateTimeTZ; overload;
     class operator Implicit(const Value: Boolean): TJsonDataValueHelper; overload;
     class operator Implicit(const Value: TJsonDataValueHelper): Boolean; overload;
     class operator Implicit(const Value: TJsonArray): TJsonDataValueHelper; overload;
@@ -414,6 +440,7 @@ type
     property ULongValue: UInt64 read GetULongValue write SetULongValue;
     property FloatValue: Double read GetFloatValue write SetFloatValue;
     property DateTimeValue: TDateTime read GetDateTimeValue write SetDateTimeValue;
+    property DateTimeTZValue: TDateTimeTZ read GetDateTimeTZValue write SetDateTimeTZValue;
     property BoolValue: Boolean read GetBoolValue write SetBoolValue;
     property ArrayValue: TJsonArray read GetArrayValue write SetArrayValue;
     property ObjectValue: TJsonObject read GetObjectValue write SetObjectValue;
@@ -430,6 +457,7 @@ type
     property U[const Name: string]: UInt64 read GetObjectULong write SetObjectULong;          // returns 0 if property doesn't exist, auto type-cast except for array/object
     property F[const Name: string]: Double read GetObjectFloat write SetObjectFloat;          // returns 0 if property doesn't exist, auto type-cast except for array/object
     property D[const Name: string]: TDateTime read GetObjectDateTime write SetObjectDateTime; // returns 0 if property doesn't exist, auto type-cast except for array/object
+    property Z[const Name: string]: TDateTimeTZ read GetObjectDateTimeTZ write SetObjectDateTimeTZ; // returns 0 if property doesn't exist, auto type-cast except for array/object
     property B[const Name: string]: Boolean read GetObjectBool write SetObjectBool;           // returns false if property doesn't exist, auto type-cast with "<>'true'" and "<>0" except for array/object
     // Used to auto create arrays
     property A[const Name: string]: TJsonArray read GetArray write SetArray;
@@ -452,7 +480,7 @@ type
         jdtLong: (FLongValue: Int64);
         jdtULong: (FULongValue: UInt64);
         jdtFloat: (FFloatValue: Double);
-        jdtDateTime: (FDateTimeValue: TDateTime);
+        jdtDateTime: (FDateTimeTZValue: TDateTimeTZ);
         jdtBool: (FBoolValue: Boolean);
         {$IFNDEF AUTOREFCOUNT}
         jdtObject: (FObj: TJsonBaseObject); // used for both Array and Object
@@ -474,8 +502,8 @@ type
   private
     class procedure StrToJSONStr(const AppendMethod: TWriterAppendMethod; const S: string); static;
     class procedure EscapeStrToJSONStr(F, P, EndP: PChar; const AppendMethod: TWriterAppendMethod); static;
-    class procedure DateTimeToJSONStr(const AppendMethod: TWriterAppendMethod;
-      const Value: TDateTime); static;
+    class procedure DateTimeTZToJSONStr(const AppendMethod: TWriterAppendMethod;
+      const Value: TDateTimeTZ); static;
     class procedure InternInitAndAssignItem(Dest, Source: PJsonDataValue); static;
     class procedure GetStreamBytes(Stream: TStream; var Encoding: TEncoding; Utf8WithoutBOM: Boolean;
       var StreamInfo: TStreamInfo); static;
@@ -537,7 +565,9 @@ type
     function Clone: TJsonBaseObject; virtual; abstract;
 
     class function JSONToDateTime(const Value: string): TDateTime; static;
+    class function JSONToDateTimeTZ(const Value: string): TDateTimeTZ; static;
     class function DateTimeToJSON(const Value: TDateTime; UseUtcTime: Boolean): string; static;
+    class function DateTimeTZToJSON(const Value: TDateTimeTZ; UseUtcTime: Boolean): string; static;
   end;
 
   PJsonDataValueArray = ^TJsonDataValueArray;
@@ -567,6 +597,7 @@ type
     function GetULong(Index: Integer): UInt64; inline;
     function GetFloat(Index: Integer): Double; inline;
     function GetDateTime(Index: Integer): TDateTime; inline;
+    function GetDateTimeTZ(Index: Integer): TDateTimeTZ; inline;
     function GetBool(Index: Integer): Boolean; inline;
     function GetArray(Index: Integer): TJsonArray; inline;
     function GetObject(Index: Integer): TJsonObject; inline;
@@ -578,6 +609,7 @@ type
     procedure SetULong(Index: Integer; const Value: UInt64); inline;
     procedure SetFloat(Index: Integer; const Value: Double); inline;
     procedure SetDateTime(Index: Integer; const Value: TDateTime); inline;
+    procedure SetDateTimeTZ(Index: Integer; const Value: TDateTimeTZ); inline;
     procedure SetBool(Index: Integer; const Value: Boolean); inline;
     procedure SetArray(Index: Integer; const Value: TJsonArray); inline;
     procedure SetObject(Index: Integer; const Value: TJsonObject); inline;
@@ -651,6 +683,7 @@ type
     property U[Index: Integer]: UInt64 read GetULong write SetULong;
     property F[Index: Integer]: Double read GetFloat write SetFloat;
     property D[Index: Integer]: TDateTime read GetDateTime write SetDateTime;
+    property Z[Index: Integer]: TDateTimeTZ read GetDateTimeTZ write SetDateTimeTZ;
     property B[Index: Integer]: Boolean read GetBool write SetBool;
     property A[Index: Integer]: TJsonArray read GetArray write SetArray;
     property O[Index: Integer]: TJsonObject read GetObject write SetObject;
@@ -703,6 +736,7 @@ type
     function GetULong(const Name: string): UInt64;
     function GetFloat(const Name: string): Double;
     function GetDateTime(const Name: string): TDateTime;
+    function GetDateTimeTZ(const Name: string): TDateTimeTZ;
     function GetObject(const Name: string): TJsonObject;
     function GetArray(const Name: string): TJsonArray;
     procedure SetString(const Name, Value: string);
@@ -712,6 +746,7 @@ type
     procedure SetULong(const Name: string; const Value: UInt64);
     procedure SetFloat(const Name: string; const Value: Double);
     procedure SetDateTime(const Name: string; const Value: TDateTime);
+    procedure SetDateTimeTZ(const Name: string; const Value: TDateTimeTZ);
     procedure SetObject(const Name: string; const Value: TJsonObject);
     procedure SetArray(const Name: string; const Value: TJsonArray);
 
@@ -785,6 +820,7 @@ type
     property U[const Name: string]: UInt64 read GetULong write SetULong;          // returns 0 if property doesn't exist, auto type-cast except for array/object
     property F[const Name: string]: Double read GetFloat write SetFloat;          // returns 0 if property doesn't exist, auto type-cast except for array/object
     property D[const Name: string]: TDateTime read GetDateTime write SetDateTime; // returns 0 if property doesn't exist, auto type-cast except for array/object
+    property Z[const Name: string]: TDateTimeTZ read GetDateTimeTZ write SetDateTimeTZ; // returns 0 if property doesn't exist, auto type-cast except for array/object
     property B[const Name: string]: Boolean read GetBool write SetBool;           // returns false if property doesn't exist, auto type-cast with "<>'true'" and "<>0" except for array/object
     property A[const Name: string]: TJsonArray read GetArray write SetArray;      // auto creates array on first access
     property O[const Name: string]: TJsonObject read GetObject write SetObject;   // auto creates object on first access
@@ -805,6 +841,10 @@ type
     NullConvertsToValueTypes: Boolean;
   end;
 
+  TJsonDeserializationConfig = record
+    UseLocalTime: Boolean;
+  end;
+
   // Rename classes because RTL classes have the same name
   TJDOJsonBaseObject = TJsonBaseObject;
   TJDOJsonObject = TJsonObject;
@@ -816,6 +856,10 @@ var
     IndentChar: #9;
     UseUtcTime: True;
     NullConvertsToValueTypes: False;  // If True and an object is nil/null, a convertion to String, Int, Long, Float, DateTime, Boolean will return ''/0/False
+  );
+
+  JsonDeserializationConfig: TJsonDeserializationConfig = ( // not thread-safe
+    UseLocalTime: True;
   );
 
 implementation
@@ -1374,6 +1418,28 @@ begin
 end;
 {$ENDIF MSWINDOWS}
 
+class function TJsonBaseObject.DateTimeTZToJSON(const Value: TDateTimeTZ; UseUtcTime: Boolean): string;
+var
+  d: TDateTime;
+  Year, Month, Day, Hour, Minute, Second, Milliseconds: Word;
+begin
+  if UseUtcTime then
+  begin
+    d := Value.UTCTime;
+    DecodeDate(d, Year, Month, Day);
+    DecodeTime(d, Hour, Minute, Second, MilliSeconds);
+    Result := Format('%.4d-%.2d-%.2dT%.2d:%.2d:%.2d.%dZ', [Year, Month, Day, Hour, Minute, Second, Milliseconds])
+  end else begin
+    d := Value;
+    DecodeDate(d, Year, Month, Day);
+    DecodeTime(d, Hour, Minute, Second, MilliSeconds);
+    Result := Format('%.4d-%.2d-%.2dT%.2d:%.2d:%.2d.%d', [Year, Month, Day, Hour, Minute, Second, Milliseconds]);
+    if Value.OffsetHours > 0 then
+      Result := Result +'+' else Result := '-';
+    Result := Result + Format('%.d:%.2d', [Abs(Value.OffsetHours), Abs(Value.OffsetMinutes)]);
+  end;
+end;
+
 function ParseDateTimePart(P: PChar; var Value: Integer; MaxLen: Integer): PChar;
 var
   V: Integer;
@@ -1414,15 +1480,15 @@ begin
   end;
 end;
 
-class function TJsonBaseObject.JSONToDateTime(const Value: string): TDateTime;
+class function TJsonBaseObject.JSONToDateTimeTZ(const Value: string): TDateTimeTZ;
 var
   P: PChar;
   MSecsSince1970: Int64;
   Year, Month, Day, Hour, Min, Sec, MSec: Integer;
   OffsetHour, OffsetMin: Integer;
-  Sign: Double;
+  Sign: SmallInt;
 begin
-  Result := 0;
+  FillChar(Result, SizeOf(Result), 0);
   if Value = '' then
     Exit;
 
@@ -1443,9 +1509,7 @@ begin
         Inc(P);
     end;
     if (P[0] = ')') and (P[1] = '/') and (P[2] = #0) then
-      Result := UtcDateTimeToLocalDateTime(UnixDateDelta + (MSecsSince1970 / MSecsPerDay))
-    else
-      Result := 0; // invalid format
+      Result.OrgTime := UnixDateDelta + (MSecsSince1970 / MSecsPerDay)
   end
   else
   begin
@@ -1464,7 +1528,7 @@ begin
     Min := 0;
     Sec := 0;
     MSec := 0;
-    Result := EncodeDate(Year, Month, Day);
+    Result.OrgTime := EncodeDate(Year, Month, Day);
 
     if P^ = 'T' then
     begin
@@ -1478,8 +1542,8 @@ begin
         if P^ = '.' then
           P := ParseDateTimePart(P + 1, MSec, 3);
       end;
-      Result := Result + EncodeTime(Hour, Min, Sec, MSec);
-      if P^ <> 'Z' then
+      Result.OrgTime := Result.OrgTime + EncodeTime(Hour, Min, Sec, MSec);
+      if (P^ <> 'Z') then
       begin
         if (P^ = '+') or (P^ = '-') then
         begin
@@ -1493,17 +1557,20 @@ begin
             Inc(P);
           ParseDateTimePart(P, OffsetMin, 2);
 
-          Result := Result + (EncodeTime(OffsetHour, OffsetMin, 0, 0) * Sign);
-        end
-        else
-        begin
-          Result := 0; // invalid format
-          Exit;
+          Result.OffsetHours := OffsetHour * Sign;
+          Result.OffsetMinutes := OffsetMin * Sign;
         end;
       end;
-      Result := UtcDateTimeToLocalDateTime(Result);
     end;
   end;
+end;
+
+class function TJsonBaseObject.JSONToDateTime(const Value: string): TDateTime;
+var
+  dtz: TDateTimeTZ;
+begin
+  dtz := JSONToDateTimeTZ(Value);
+  Result := UtcDateTimeToLocalDateTime(dtz.UTCTime);
 end;
 
 {$IFDEF NEXTGEN}
@@ -2102,7 +2169,7 @@ begin
     jdtFloat:
       FValue.F := 0;
     jdtDateTime:
-      FValue.D := 0;
+      FValue.D := TDateTimeTZ.Create(0);
     jdtBool:
       FValue.B := False;
     jdtArray,
@@ -2259,7 +2326,7 @@ begin
       jdtFloat:
         FValue.F := AValue;
       jdtDateTime:
-        FValue.D := AValue;
+        FValue.D := TDateTimeTZ.Create(AValue);
       jdtBool:
         FValue.B := AValue;
 //    else
@@ -2310,7 +2377,7 @@ begin
     jdtFloat:
       Result := FloatToStr(FValue.F, JSONFormatSettings);
     jdtDateTime:
-      Result := TJsonBaseObject.DateTimeToJson(FValue.F, JsonSerializationConfig.UseUtcTime);
+      Result := TJsonBaseObject.DateTimeTZToJSON(FValue.D, JsonSerializationConfig.UseUtcTime);
     jdtBool:
       if FValue.B then
         Result := sTrue
@@ -2373,7 +2440,9 @@ begin
     jdtFloat:
       Result := Trunc(FValue.F);
     jdtDateTime:
-      Result := Trunc(FValue.D);
+      if JsonDeserializationConfig.UseLocalTime then
+        Result := Trunc(FValue.D.LocalTime)
+      else Result := Trunc(FValue.D.OrgTime);
     jdtBool:
       Result := Ord(FValue.B);
     jdtObject:
@@ -2419,7 +2488,9 @@ begin
     jdtFloat:
       Result := Trunc(FValue.F);
     jdtDateTime:
-      Result := Trunc(FValue.D);
+      if JsonDeserializationConfig.UseLocalTime then
+        Result := Trunc(FValue.D.LocalTime)
+      else Result := Trunc(FValue.D.OrgTime);
     jdtBool:
       Result := Ord(FValue.B);
     jdtObject:
@@ -2465,7 +2536,9 @@ begin
     jdtFloat:
       Result := Trunc(FValue.F);
     jdtDateTime:
-      Result := Trunc(FValue.D);
+      if JsonDeserializationConfig.UseLocalTime then
+        Result := Trunc(FValue.D.LocalTime)
+      else Result := Trunc(FValue.D.OrgTime);
     jdtBool:
       Result := Ord(FValue.B);
     jdtObject:
@@ -2555,7 +2628,9 @@ begin
     jdtFloat:
       Result := FValue.F;
     jdtDateTime:
-      Result := FValue.D;
+      if JsonDeserializationConfig.UseLocalTime then
+        Result := FValue.D.LocalTime
+      else Result := FValue.D.OrgTime;
     jdtBool:
       Result := Ord(FValue.B);
     jdtObject:
@@ -2570,7 +2645,58 @@ begin
   end;
 end;
 
+function TJsonDataValue.GetDateTimeTZValue: TDateTimeTZ;
+begin
+  case FTyp of
+    jdtNone:
+      Result := TDateTimeTZ.Create(0);
+    jdtString:
+      Result := TJsonBaseObject.JSONToDateTimeTZ(string(FValue.S));
+    jdtInt:
+      Result := TDateTimeTZ.Create(FValue.I);
+    jdtLong:
+      Result := TDateTimeTZ.Create(FValue.L);
+    jdtULong:
+      Result := TDateTimeTZ.Create(FValue.U);
+    jdtFloat:
+      Result := TDateTimeTZ.Create(FValue.F);
+    jdtDateTime:
+      Result := FValue.D;
+    jdtBool:
+      Result := TDateTimeTZ.Create(Ord(FValue.B));
+    jdtObject:
+      begin
+        if not JsonSerializationConfig.NullConvertsToValueTypes or (FValue.O <> nil) then
+          TypeCastError(jdtDateTime);
+        Result := TDateTimeTZ.Create(0);
+      end;
+  else
+    TypeCastError(jdtDateTime);
+    Result := TDateTimeTZ.Create(0);
+  end;
+end;
+
 procedure TJsonDataValue.SetDateTimeValue(const AValue: TDateTime);
+var
+  LTyp: TJsonDataType;
+  old: TDateTime;
+begin
+  LTyp := FTyp;
+  if JsonDeserializationConfig.UseLocalTime then
+    old := FValue.D.LocalTime
+  else old := FValue.D.OrgTime;
+  if (LTyp <> jdtDateTime) or (AValue <> old) then
+  begin
+    if LTyp <> jdtNone then
+      Clear;
+    FTyp := jdtDateTime;
+    if JsonDeserializationConfig.UseLocalTime then
+      FValue.D := TDateTimeTZ.Create(AValue)
+    else FValue.D.OrgTime := AValue;
+  end;
+end;
+
+procedure TJsonDataValue.SetDateTimeTZValue(const AValue: TDateTimeTZ);
 var
   LTyp: TJsonDataType;
 begin
@@ -2600,7 +2726,9 @@ begin
     jdtFloat:
       Result := FValue.F <> 0;
     jdtDateTime:
-      Result := FValue.D <> 0;
+      if JsonDeserializationConfig.UseLocalTime then
+        Result := FValue.D.LocalTime <> 0
+      else Result := FValue.D.OrgTime <> 0;
     jdtBool:
       Result := FValue.B;
     jdtObject:
@@ -2758,7 +2886,7 @@ begin
     jdtFloat:
       Writer.AppendValue(Buffer, DoubleToText(Buffer, FValue.F));
     jdtDateTime:
-      TJsonBaseObject.DateTimeToJSONStr(Writer.AppendStrValue, FValue.D); // do the conversion in a function to prevent the compiler from creating a string intermediate in this method
+      TJsonBaseObject.DateTimeTZToJSONStr(Writer.AppendStrValue, FValue.D); // do the conversion in a function to prevent the compiler from creating a string intermediate in this method
     jdtBool:
       if FValue.B then
         Writer.AppendValue(sTrue)
@@ -2837,11 +2965,11 @@ begin
     AppendMethod(nil, 0);
 end;
 
-class procedure TJsonBaseObject.DateTimeToJSONStr(const AppendMethod: TWriterAppendMethod; const Value: TDateTime);
+class procedure TJsonBaseObject.DateTimeTZToJSONStr(const AppendMethod: TWriterAppendMethod; const Value: TDateTimeTZ);
 var
   S: string;
 begin
-  S := TJsonBaseObject.DateTimeToJSON(Value, JsonSerializationConfig.UseUtcTime);
+  S := TJsonBaseObject.DateTimeTZToJSON(Value, JsonSerializationConfig.UseUtcTime);
   // StrToJSONStr isn't necessary because the date-time string doesn't contain any char
   // that must be escaped.
   AppendMethod(PChar(S), Length(S));
@@ -3679,6 +3807,15 @@ begin
   Result := FItems[Index].DateTimeValue;
 end;
 
+function TJsonArray.GetDateTimeTZ(Index: Integer): TDateTimeTZ;
+begin
+  {$IFDEF CHECK_ARRAY_INDEX}
+  if Cardinal(Index) >= Cardinal(FCount) then
+    RaiseListError(Index);
+  {$ENDIF CHECK_ARRAY_INDEX}
+  Result := FItems[Index].DateTimeTZValue;
+end;
+
 function TJsonArray.GetItem(Index: Integer): PJsonDataValue;
 begin
   {$IFDEF CHECK_ARRAY_INDEX}
@@ -3995,6 +4132,15 @@ begin
     RaiseListError(Index);
   {$ENDIF CHECK_ARRAY_INDEX}
   FItems[Index].DateTimeValue := Value;
+end;
+
+procedure TJsonArray.SetDateTimeTZ(Index: Integer; const Value: TDateTimeTZ);
+begin
+  {$IFDEF CHECK_ARRAY_INDEX}
+  if Cardinal(Index) >= Cardinal(FCount) then
+    RaiseListError(Index);
+  {$ENDIF CHECK_ARRAY_INDEX}
+  FItems[Index].DateTimeTZValue := Value;
 end;
 
 procedure TJsonArray.SetBool(Index: Integer; const Value: Boolean);
@@ -4409,6 +4555,16 @@ begin
     Result := 0;
 end;
 
+function TJsonObject.GetDateTimeTZ(const Name: string): TDateTimeTZ;
+var
+  Item: PJsonDataValue;
+begin
+  if FindItem(Name, Item) then
+    Result := Item.DateTimeTZValue
+  else
+    Result := 0;
+end;
+
 function TJsonObject.GetObject(const Name: string): TJsonObject;
 var
   Item: PJsonDataValue;
@@ -4468,6 +4624,11 @@ end;
 procedure TJsonObject.SetDateTime(const Name: string; const Value: TDateTime);
 begin
   RequireItem(Name).DateTimeValue := Value;
+end;
+
+procedure TJsonObject.SetDateTimeTZ(const Name: string; const Value: TDateTimeTZ);
+begin
+  RequireItem(Name).DateTimeTZValue := Value;
 end;
 
 procedure TJsonObject.SetObject(const Name: string; const Value: TJsonObject);
@@ -6796,7 +6957,7 @@ begin
       jdtFloat:
         Result := FloatToStr(Value.FData.FFloatValue, JSONFormatSettings);
       jdtDateTime:
-        Result := TJsonBaseObject.DateTimeToJSON(Value.FData.FDateTimeValue, JsonSerializationConfig.UseUtcTime);
+        Result := TJsonBaseObject.DateTimeTZToJSON(Value.FData.FDateTimeTZValue, JsonSerializationConfig.UseUtcTime);
       jdtBool:
         if Value.FData.FBoolValue then
           Result := sTrue
@@ -6837,7 +6998,9 @@ begin
       jdtFloat:
         Result := Trunc(Value.FData.FFloatValue);
       jdtDateTime:
-        Result := Trunc(Value.FData.FDateTimeValue);
+        if JsonDeserializationConfig.UseLocalTime then
+          Result := Trunc(Value.FData.FDateTimeTZValue.LocalTime)
+        else Result := Trunc(Value.FData.FDateTimeTZValue.OrgTime);
       jdtBool:
         Result := Ord(Value.FData.FBoolValue);
     else
@@ -6875,7 +7038,9 @@ begin
       jdtFloat:
         Result := Trunc(Value.FData.FFloatValue);
       jdtDateTime:
-        Result := Trunc(Value.FData.FDateTimeValue);
+        if JsonDeserializationConfig.UseLocalTime then
+          Result := Trunc(Value.FData.FDateTimeTZValue.LocalTime)
+        else Result := Trunc(Value.FData.FDateTimeTZValue.OrgTime);
       jdtBool:
         Result := Ord(Value.FData.FBoolValue);
     else
@@ -6951,7 +7116,9 @@ begin
       jdtFloat:
         Result := Value.FData.FFloatValue;
       jdtDateTime:
-        Result := Value.FData.FDateTimeValue;
+        if JsonDeserializationConfig.UseLocalTime then
+          Result := Value.FData.FDateTimeTZValue.LocalTime
+        else Result := Value.FData.FDateTimeTZValue.OrgTime;
       jdtBool:
         Result := Ord(Value.FData.FBoolValue);
     else
@@ -6989,7 +7156,9 @@ begin
       jdtFloat:
         Result := Value.FData.FFloatValue;
       jdtDateTime:
-        Result := Value.FData.FDateTimeValue;
+        if JsonDeserializationConfig.UseLocalTime then
+          Result := Value.FData.FDateTimeTZValue.LocalTime
+        else Result := Value.FData.FDateTimeTZValue.OrgTime;
       jdtBool:
         Result := Ord(Value.FData.FBoolValue);
     else
@@ -7007,7 +7176,20 @@ begin
     Result.FData.FObj := nil;
   {$ENDIF AUTOREFCOUNT}
   Result.FData.FTyp := jdtDateTime;
-  Result.FData.FDateTimeValue := Value;
+  Result.FData.FDateTimeTZValue := TDateTimeTZ.Create(Value);
+end;
+
+class operator TJsonDataValueHelper.Implicit(const Value: TDateTimeTZ): TJsonDataValueHelper;
+begin
+  Result.FData.FName := '';
+  Result.FData.FNameResolver := nil;
+  Result.FData.FIntern := nil;
+  {$IFDEF AUTOREFCOUNT}
+  if Result.FData.FObj <> nil then
+    Result.FData.FObj := nil;
+  {$ENDIF AUTOREFCOUNT}
+  Result.FData.FTyp := jdtDateTime;
+  Result.FData.FDateTimeTZValue := Value;
 end;
 
 class operator TJsonDataValueHelper.Implicit(const Value: TJsonDataValueHelper): TDateTime;
@@ -7027,11 +7209,38 @@ begin
       jdtFloat:
         Result := Value.FData.FFloatValue;
       jdtDateTime:
-        Result := Value.FData.FDateTimeValue;
+        if JsonDeserializationConfig.UseLocalTime then
+          Result := Value.FData.FDateTimeTZValue.LocalTime
+        else Result := Value.FData.FDateTimeTZValue.OrgTime;
       jdtBool:
         Result := Ord(Value.FData.FBoolValue);
     else
       Result := 0;
+    end;
+end;
+
+class operator TJsonDataValueHelper.Implicit(const Value: TJsonDataValueHelper): TDateTimeTZ;
+begin
+  if Value.FData.FIntern <> nil then
+    Result := Value.FData.FIntern.DateTimeTZValue
+  else
+    case Value.FData.FTyp of
+      jdtString:
+        Result := TJsonBaseObject.JSONToDateTimeTZ(Value.FData.FValue);
+      jdtInt:
+        Result := TDateTimeTZ.Create(Value.FData.FIntValue);
+      jdtLong:
+        Result := TDateTimeTZ.Create(Value.FData.FLongValue);
+      jdtULong:
+        Result := TDateTimeTZ.Create(Value.FData.FULongValue);
+      jdtFloat:
+        Result := TDateTimeTZ.Create(Value.FData.FFloatValue);
+      jdtDateTime:
+        Result := TDateTimeTZ.Create(Value.FData.FDateTimeTZValue);
+      jdtBool:
+        Result := TDateTimeTZ.Create(Ord(Value.FData.FBoolValue));
+    else
+      Result := TDateTimeTZ.Create(0);
     end;
 end;
 
@@ -7065,7 +7274,9 @@ begin
       jdtFloat:
         Result := Value.FData.FFloatValue <> 0;
       jdtDateTime:
-        Result := Value.FData.FDateTimeValue <> 0;
+        if JsonDeserializationConfig.UseLocalTime then
+          Result := Value.FData.FDateTimeTZValue.LocalTime <> 0
+        else Result := Value.FData.FDateTimeTZValue.OrgTime <> 0;
       jdtBool:
         Result := Value.FData.FBoolValue;
     else
@@ -7161,7 +7372,9 @@ begin
       jdtFloat:
         Result := Value.FData.FFloatValue;
       jdtDateTime:
-        Result := Value.FData.FDateTimeValue;
+        if JsonDeserializationConfig.UseLocalTime then
+          Result := Value.FData.FDateTimeTZValue.LocalTime
+        else Result := Value.FData.FDateTimeTZValue.OrgTime;
       jdtBool:
         Result := Value.FData.FBoolValue;
       jdtArray:
@@ -7204,7 +7417,7 @@ begin
       jdtFloat:
         Result.FData.FFloatValue := Value;
       jdtDateTime:
-        Result.FData.FDateTimeValue := Value;
+        Result.FData.FDateTimeTZValue := TDateTimeTZ.Create(Value);
       jdtBool:
         Result.FData.FBoolValue := Value;
     end;
@@ -7272,7 +7485,9 @@ begin
       jdtFloat:
         Result := Trunc(FData.FFloatValue);
       jdtDateTime:
-        Result := Trunc(FData.FDateTimeValue);
+        if JsonDeserializationConfig.UseLocalTime then
+          Result := Trunc(FData.FDateTimeTZValue.LocalTime)
+        else Result := Trunc(FData.FDateTimeTZValue.OrgTime);
       jdtBool:
         Result := Ord(FData.FBoolValue);
     else
@@ -7320,11 +7535,25 @@ begin
   Result := Self;
 end;
 
+function TJsonDataValueHelper.GetDateTimeTZValue: TDateTimeTZ;
+begin
+  Result := Self;
+end;
+
 procedure TJsonDataValueHelper.SetDateTimeValue(const Value: TDateTime);
 begin
   ResolveName;
   if FData.FIntern <> nil then
     FData.FIntern.DateTimeValue := Value
+  else
+    Self := Value;
+end;
+
+procedure TJsonDataValueHelper.SetDateTimeTZValue(const Value: TDateTimeTZ);
+begin
+  ResolveName;
+  if FData.FIntern <> nil then
+    FData.FIntern.DateTimeTZValue := Value
   else
     Self := Value;
 end;
@@ -7433,7 +7662,7 @@ begin
       jdtFloat:
         Item.FloatValue := Value.FData.FFloatValue;
       jdtDateTime:
-        Item.DateTimeValue := Value.FData.FDateTimeValue;
+        Item.DateTimeTZValue := Value.FData.FDateTimeTZValue;
       jdtBool:
         Item.BoolValue := Value.FData.FBoolValue;
       jdtArray:
@@ -7496,6 +7725,11 @@ begin
   Result := ObjectValue.D[Name];
 end;
 
+function TJsonDataValueHelper.GetObjectDateTimeTZ(const Name: string): TDateTimeTZ;
+begin
+  Result := ObjectValue.Z[Name];
+end;
+
 function TJsonDataValueHelper.GetObjectBool(const Name: string): Boolean;
 begin
   Result := ObjectValue.B[Name];
@@ -7544,6 +7778,11 @@ end;
 procedure TJsonDataValueHelper.SetObjectDateTime(const Name: string; const Value: TDateTime);
 begin
   ObjectValue.D[Name] := Value;
+end;
+
+procedure TJsonDataValueHelper.SetObjectDateTimeTZ(const Name: string; const Value: TDateTimeTZ);
+begin
+  ObjectValue.Z[Name] := Value;
 end;
 
 procedure TJsonDataValueHelper.SetObjectBool(const Name: string; const Value: Boolean);
@@ -7967,6 +8206,78 @@ begin
     end;
   end;
   Result := Pointer(FBytes);
+end;
+
+{ TDateTimeTZ }
+
+constructor TDateTimeTZ.Create(Value: TDateTime);
+var
+  Offset: TDateTime;
+{$IFDEF MSWINDOWS}
+  LocalTime, UtcTime: TSystemTime;
+  Hour, Min, Sec, MSec: Word;
+{$ENDIF}
+begin
+{$IFDEF MSWINDOWS}
+  DateTimeToSystemTime(Value, LocalTime);
+  Offset := Value - SystemTimeToDateTime(UtcTime);
+{$ELSE}
+  Offset := Value - TTimeZone.Local.ToUniversalTime(Value);
+{$ENDIF}
+  DecodeTime(Offset, Hour, Min, Sec, MSec);
+  if Offset < 0 then
+    Create(Value, -Hour, -Min)
+  else Create(Value, Hour, Min);
+end;
+
+constructor TDateTimeTZ.Create(Value: TDateTime;
+  OffsetHours: SmallInt; OffsetMinutes: Word = 0);
+begin
+  Self.OrgTime := Value;
+  Self.OffsetHours := OffsetHours;
+  Self.OffsetMinutes := OffsetMinutes;
+end;
+
+class operator TDateTimeTZ.Equal(a, b: TDateTimeTZ): Boolean;
+begin
+  Result := CompareMem(@a, @b, SizeOf(a));
+end;
+
+class operator TDateTimeTZ.Implicit(const Value: TDateTime): TDateTimeTZ;
+begin
+  Result := TDateTimeTZ.Create(Value);
+end;
+
+function TDateTimeTZ.LocalTime: TDateTime;
+var
+  t: TDateTimeTZ;
+begin
+  t := TDateTimeTZ.Create(0);
+  Result := Self.RemoteTime(t.OffsetHours, t.OffsetMinutes);
+end;
+
+class operator TDateTimeTZ.Implicit(const Value: TDateTimeTZ): TDateTime;
+begin
+  Result := Value.LocalTime;
+end;
+
+class operator TDateTimeTZ.NotEqual(a, b: TDateTimeTZ): Boolean;
+begin
+  Result := not CompareMem(@a, @b, SizeOf(a));
+end;
+
+function TDateTimeTZ.RemoteTime(AOffsetHours: SmallInt;
+  AOffsetMinutes: Word = 0): TDateTime;
+begin
+  Result := Self.UTCTime + (AOffsetHours * SecsPerHour * MSecsPerSec) +
+      (AOffsetMinutes * SecsPerMin * MSecsPerSec);
+end;
+
+function TDateTimeTZ.UTCTime: TDateTime;
+begin
+  Result := Self.OrgTime - (
+      (OffsetHours * SecsPerHour * MSecsPerSec) +
+      (OffsetMinutes * SecsPerMin * MSecsPerSec) );
 end;
 
 initialization
