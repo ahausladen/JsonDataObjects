@@ -69,6 +69,7 @@ type
     procedure TestUInt64;
     procedure TestProgress;
     procedure TestSyntaxErrors;
+    procedure TestDateTimeToJsonString;
   end;
 
   TestTJsonArray = class(TTestCase)
@@ -1402,12 +1403,14 @@ begin
 
     // did this here because right now we can't auto parse datetime values
     O.D['DateTime'] := TJsonBaseObject.JSONToDateTime('2014-12-31T23:59:59.999Z');
+    O.DUtc['UtcDateTime'] := TJsonBaseObject.JSONToDateTime('2014-12-31T23:59:59.999Z', False);
 
     Check(O['Key'].VariantValue = 123, 'Int to Variant');
     Check(O['Bool'].VariantValue = True, 'Boolean to Variant');
     Check(O['Null'].VariantValue = Null, 'null to Variant');
     Check(CompareFloatRel(O['Float'].VariantValue, -1.234567890E10), 'Float to Variant');
     Check(CompareFloatRel(O['DateTime'].VariantValue, TJsonBaseObject.JSONToDateTime('2014-12-31T23:59:59.999Z')), 'DateTime to Variant');
+    Check(CompareFloatRel(O['UtcDateTime'].VariantValue, TJsonBaseObject.JSONToDateTime('2014-12-31T23:59:59.999Z')), 'UtcDateTime to Variant (local time)');
     Check(O['Int64'].VariantValue = 1234567890123456789, 'Int64 to Variant');
 
     CheckException(ObjectToVariantException, EJsonCastException, 'Object to Variant exception');
@@ -1660,6 +1663,33 @@ begin
   end;
 end;
 
+procedure TestTJsonBaseObject.TestDateTimeToJsonString;
+var
+  O: TJsonObject;
+  S: string;
+  dt: TDateTime;
+begin
+  dt := EncodeDate(2018, 08, 13) {+ EncodeTime(0, 0, 0, 0)};
+  O := TJsonObject.Create;
+  try
+    O.D['DateTime'] := dt;
+    O.DUtc['UtcDateTime'] := dt;
+    S := O.ToJSON;
+
+    CheckEquals('{"DateTime":"' + TJsonBaseObject.DateTimeToJSON(dt, True) + '","UtcDateTime":"2018-08-13T00:00:00.0Z"}', S, 'DateTime/UtcDateTime as string');
+  finally
+    O.Free;
+  end;
+
+  O := TJsonBaseObject.Parse(S) as TJsonObject;
+  try
+    CheckEquals(dt, O.D['DateTime']);
+    CheckEquals(dt, O.DUtc['UtcDateTime']);
+  finally
+    O.Free;
+  end;
+end;
+
 { TestTJsonArray }
 
 procedure TestTJsonArray.SetUp;
@@ -1803,6 +1833,14 @@ begin
     CheckEquals(21, A.Count);
     Check(A.Types[20] = jdtULong, 'jdtULong');
     CheckEquals(12345678901234567890, A.U[20]);
+
+    A.AddUtcDateTime(TJsonBaseObject.JSONToDateTime('2014-12-31T23:59:59.999Z', False));
+    CheckEquals(22, A.Count);
+    Check(A.Types[21] = jdtUtcDateTime, 'jdtUtcDateTime');
+    CheckEquals(TJsonBaseObject.JSONToDateTime('2014-12-31T23:59:59.999Z', False), A.F[21]); // Float is the native Utc-DateTime value
+    CheckEquals(TJsonBaseObject.JSONToDateTime('2014-12-31T23:59:59.999Z'), A.D[21]); // converted to local time
+    CheckEquals(TJsonBaseObject.JSONToDateTime('2014-12-31T23:59:59.999Z', False), A.DUtc[21]);
+
   finally
     A.Free;
   end;
@@ -1893,6 +1931,7 @@ begin
 
     // did this here because right now we can't auto parse datetime values
     A.Add(TJsonBaseObject.JSONToDateTime('2014-12-31T23:59:59.999Z'));
+    A.AddUtcDateTime(TJsonBaseObject.JSONToDateTime('2014-12-31T23:59:59.999Z', False));
 
     for Value in A do
     begin
@@ -1908,7 +1947,8 @@ begin
         jdtLong:    CheckEquals(1234567890123456789, Value, 'Long value');
         jdtULong:   CheckEquals(12345678901234567890, Value.ULongValue, 'ULong value');
         jdtFloat:   CheckEquals(1.12, Value, 0.001, 'Float value');
-        jdtDateTime:CheckEquals(TJsonBaseObject.JSONToDateTime('2014-12-31T23:59:59.999Z'), TDateTime(Value), 0.001, 'DateTime value');        // may be we need to add extended vartype overload?
+        jdtDateTime: CheckEquals(TJsonBaseObject.JSONToDateTime('2014-12-31T23:59:59.999Z'), TDateTime(Value), 0.001, 'DateTime value');        // may be we need to add extended vartype overload?
+        jdtUtcDateTime: CheckEquals(TJsonBaseObject.JSONToDateTime('2014-12-31T23:59:59.999Z', False), Value.UtcDateTimeValue, 0.001, 'UtcDateTime value');        // may be we need to add extended vartype overload?
         jdtBool:    CheckEquals(True, Value, 'Boolean value');
         jdtArray:   CheckEquals(3, Value.Count, 'Array count');
         jdtObject:  CheckEquals('Value', Value.S['Key'], 'Object value');
@@ -2554,6 +2594,7 @@ begin
       FoundTypes[Typ] := False;
 
     FoundTypes[jdtDateTime] := True;
+    FoundTypes[jdtUtcDateTime] := True;
 
     Obj.FromJSON('{ "Int": 42, "Object": { "Key": "Value" }, "Bool": true, "Null": null, ' +
                    '"Long": 1234567890123456789, "ULong": 12345678901234567890, "Float": 1.12, ' +
@@ -2561,6 +2602,7 @@ begin
 
     // did this here because right now we can't auto parse datetime values
     Obj.D['DateTime'] := TJsonBaseObject.JSONToDateTime('2014-12-31T23:59:59.999Z');
+    Obj.DUtc['UtcDateTime'] := TJsonBaseObject.JSONToDateTime('2014-12-31T23:59:59.999Z', False);
 
     for Pair in Obj do
     begin
@@ -2605,6 +2647,12 @@ begin
           begin
             CheckEquals('DateTime', Pair.Name, 'DateTime name');
             CheckEquals(TJsonBaseObject.JSONToDateTime('2014-12-31T23:59:59.999Z'), Pair.Value, 0.001, 'DateTime value');
+          end;
+
+        jdtUtcDateTime:
+          begin
+            CheckEquals('UtcDateTime', Pair.Name, 'UtcDateTime name');
+            CheckEquals(TJsonBaseObject.JSONToDateTime('2014-12-31T23:59:59.999Z', False), Pair.Value, 0.001, 'UtcDateTime value');
           end;
 
         jdtBool:
