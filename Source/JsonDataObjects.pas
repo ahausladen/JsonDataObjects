@@ -1127,6 +1127,60 @@ begin
 end;
 {$ENDIF USE_NAME_STRING_LITERAL}
 
+type
+  PDynArrayRec = ^TDynArrayRec;
+  TDynArrayRec = packed record
+    {$IF defined(CPUX64) or defined(CPU64BITS)} // XE2-XE7 (CPUX64), XE8+ (CPU64BITS)
+    _Padding: Integer;
+    {$IFEND}
+    RefCnt: Integer;
+    Length: NativeInt;
+    Data: record end;
+  end;
+
+procedure ByteArraySetLengthUninit(var A: TBytes; Count: Integer);
+var
+  P: PDynArrayRec;
+begin
+  if A = nil then
+  begin
+    if Count > 0 then
+    begin
+      GetMem(Pointer(P), SizeOf(TDynArrayRec) + Count * SizeOf(Byte));
+      P.RefCnt := 1;
+      P.Length := Count;
+      Pointer(A) := @P.Data;
+    end;
+  end
+  else if Count <= 0 then
+  begin
+    P := PDynArrayRec(PByte(A) - SizeOf(TDynArrayRec));
+    //if InterlockedDecrement(P.RefCnt) = 0 then
+    Dec(P.RefCnt);
+    if P.RefCnt = 0 then
+      FreeMem(P);
+    Pointer(A) := nil;
+  end
+  else
+  begin
+    P := PDynArrayRec(PByte(A) - SizeOf(TDynArrayRec));
+    if P.RefCnt = 1 then
+    begin
+      ReallocMem(Pointer(P), SizeOf(TDynArrayRec) + Count * SizeOf(Byte));
+      P.Length := Count;
+      Pointer(A) := @P.Data;
+    end
+    else
+    begin
+      GetMem(Pointer(P), SizeOf(TDynArrayRec) + Count * SizeOf(Integer));
+      Move(A[0], P.Data, PDynArrayRec(PByte(A) - SizeOf(TDynArrayRec)).Length * SizeOf(Byte));
+      P.RefCnt := 1;
+      P.Length := Count;
+      Pointer(A) := @P.Data;
+    end;
+  end;
+end;
+
 { EJsonParserSyntaxException }
 
 constructor EJsonParserException.CreateResFmt(ResStringRec: PResStringRec; const Args: array of const;
@@ -3384,7 +3438,7 @@ begin
     Stream.Free;
   end;
   if Length(Bytes) <> Size then
-    SetLength(Bytes, Size);
+    ByteArraySetLengthUninit(Bytes, Size);
 end;
 
 function TJsonBaseObject.ToString: string;
@@ -7963,7 +8017,7 @@ begin
       if L < NewCapacity then
         L := NewCapacity;
       NewCapacity := L;
-      SetLength(FBytes, L);
+      ByteArraySetLengthUninit(FBytes, L);
     end;
   end;
   Result := Pointer(FBytes);
