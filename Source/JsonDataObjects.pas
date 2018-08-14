@@ -543,12 +543,12 @@ type
   PJsonDataValueArray = ^TJsonDataValueArray;
   TJsonDataValueArray = array[0..MaxInt div SizeOf(TJsonDataValue) - 1] of TJsonDataValue;
 
-  TJsonArrayEnumerator = class(TObject)
+  TJsonArrayEnumerator = record
   private
     FIndex: Integer;
     FArray: TJsonArray;
   public
-    constructor Create(AArray: TJSonArray);
+    constructor Create(AArray: TJsonArray);
 
     function GetCurrent: TJsonDataValueHelper; inline;
     function MoveNext: Boolean;
@@ -666,8 +666,8 @@ type
     Value: TJsonDataValueHelper;
   end;
 
-  TJsonObjectEnumerator = class(TObject)
-  protected
+  TJsonObjectEnumerator = record
+  private
     FIndex: Integer;
     FObject: TJsonObject;
   public
@@ -3521,7 +3521,6 @@ end;
 
 constructor TJsonArrayEnumerator.Create(AArray: TJSonArray);
 begin
-  inherited Create;
   FIndex := -1;
   FArray := AArray;
 end;
@@ -4194,7 +4193,6 @@ end;
 
 constructor TJsonObjectEnumerator.Create(AObject: TJsonObject);
 begin
-  inherited Create;
   FIndex := -1;
   FObject := AObject;
 end;
