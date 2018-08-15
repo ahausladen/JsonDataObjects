@@ -1383,7 +1383,7 @@ begin
 end;
 {$ELSE}
 begin
-  Result := TTimeZone.Local.ToLocalTime(UtcDateTime);
+  Result := TTimeZone.Local.ToUniversalTime(DateTime);
 end;
 {$ENDIF MSWINDOWS}
 
