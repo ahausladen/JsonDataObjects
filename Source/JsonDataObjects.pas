@@ -1429,6 +1429,16 @@ begin
 end;
 {$ENDIF MSWINDOWS}
 
+class function TJsonBaseObject.UtcDateTimeToJSON(const UtcDateTime: TDateTime): string;
+var
+  Year, Month, Day, Hour, Minute, Second, Milliseconds: Word;
+begin
+  DecodeDate(UtcDateTime, Year, Month, Day);
+  DecodeTime(UtcDateTime, Hour, Minute, Second, MilliSeconds);
+  Result := Format('%.4d-%.2d-%.2dT%.2d:%.2d:%.2d.%dZ',
+    [Year, Month, Day, Hour, Minute, Second, Milliseconds]);
+end;
+
 class function TJsonBaseObject.DateTimeToJSON(const Value: TDateTime; UseUtcTime: Boolean): string;
 {$IFDEF MSWINDOWS}
 var
@@ -1447,31 +1457,13 @@ begin
     Result := DateTimeToISO8601(Value);
 end;
 {$ELSE}
-var
-  UtcTime: TDateTime;
-  Year, Month, Day, Hour, Minute, Second, Milliseconds: Word;
 begin
   if UseUtcTime then
-  begin
-    UtcTime := TTimeZone.Local.ToUniversalTime(Value);
-    DecodeDate(UtcTime, Year, Month, Day);
-    DecodeTime(UtcTime, Hour, Minute, Second, MilliSeconds);
-    Result := Format('%.4d-%.2d-%.2dT%.2d:%.2d:%.2d.%dZ', [Year, Month, Day, Hour, Minute, Second, Milliseconds]);
-  end
+    Result := UtcDateTimeToJSON(TTimeZone.Local.ToUniversalTime(Value))
   else
     Result := DateTimeToISO8601(Value);
 end;
 {$ENDIF MSWINDOWS}
-
-class function TJsonBaseObject.UtcDateTimeToJSON(const UtcDateTime: TDateTime): string;
-var
-  UtcTime: TSystemTime;
-begin
-  DateTimeToSystemTime(UtcDateTime, UtcTime);
-  Result := Format('%.4d-%.2d-%.2dT%.2d:%.2d:%.2d.%dZ',
-    [UtcTime.wYear, UtcTime.wMonth, UtcTime.wDay,
-     UtcTime.wHour, UtcTime.wMinute, UtcTime.wSecond, UtcTime.wMilliseconds]);
-end;
 
 function ParseDateTimePart(P: PChar; var Value: Integer; MaxLen: Integer): PChar;
 var
