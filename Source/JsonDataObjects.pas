@@ -1574,7 +1574,7 @@ begin
           P := ParseDateTimePart(P + 1, MSec, 3);
       end;
       Result := Result + EncodeTime(Hour, Min, Sec, MSec);
-      if P^ <> 'Z' then
+      if (P^ <> 'Z') and (P^ <> #0) then
       begin
         if (P^ = '+') or (P^ = '-') then
         begin

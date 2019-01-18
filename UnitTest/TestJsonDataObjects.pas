@@ -1225,6 +1225,7 @@ begin
   TJsonBaseObject.JSONToDateTime('2009-01-01T12:00:00+0100');
   TJsonBaseObject.JSONToDateTime('2015-02-14T22:58+01:00');
   TJsonBaseObject.JSONToDateTime('2015-02-14T22:58+0100');
+  CheckNotEquals(0, TJsonBaseObject.JSONToDateTime('2015-02-14T22:58'));
 end;
 
 procedure TestTJsonBaseObject.TestEmptyString;
