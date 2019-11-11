@@ -549,7 +549,7 @@ type
     // ToString() returns a compact JSON string
     function ToString: string; override;
 
-    function Clone: TJsonBaseObject; virtual; abstract;
+    function Clone: TJsonBaseObject;
 
     class function JSONToDateTime(const Value: string; ConvertToLocalTime: Boolean = True): TDateTime; static;
     class function DateTimeToJSON(const Value: TDateTime; UseUtcTime: Boolean): string; static;
@@ -630,7 +630,7 @@ type
     function ExtractArray(Index: Integer): TJsonArray;
     function ExtractObject(Index: Integer): TJsonObject;
     procedure Assign(ASource: TJsonArray);
-    function Clone: TJsonBaseObject; override;
+    function Clone: TJsonArray;
 
     procedure Add(const AValue: string); overload;
     procedure Add(const AValue: Integer); overload;
@@ -783,7 +783,7 @@ type
   public
     destructor Destroy; override;
     procedure Assign(ASource: TJsonObject);
-    function Clone: TJsonBaseObject; override;
+    function Clone: TJsonObject;
 
     // ToSimpleObject() maps the JSON object properties to the Delphi object by using the object's
     // TypeInfo.
@@ -1451,6 +1451,14 @@ begin
   DecodeTime(UtcDateTime, Hour, Minute, Second, MilliSeconds);
   Result := Format('%.4d-%.2d-%.2dT%.2d:%.2d:%.2d.%dZ',
     [Year, Month, Day, Hour, Minute, Second, Milliseconds]);
+end;
+
+function TJsonBaseObject.Clone: TJsonBaseObject;
+begin
+  if Self is TJsonArray then
+    Result := TJsonArray(Self).Clone
+  else
+    Result := TJsonObject(Self).Clone;
 end;
 
 class function TJsonBaseObject.DateTimeToJSON(const Value: TDateTime; UseUtcTime: Boolean): string;
@@ -4323,7 +4331,7 @@ begin
   end;
 end;
 
-function TJsonArray.Clone: TJsonBaseObject;
+function TJsonArray.Clone: TJsonArray;
 begin
   Result := TJsonArray.Create;
   try
@@ -5236,7 +5244,7 @@ begin
   end;
 end;
 
-function TJsonObject.Clone: TJsonBaseObject;
+function TJsonObject.Clone: TJsonObject;
 begin
   Result := TJsonObject.Create;
   try
