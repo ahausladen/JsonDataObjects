@@ -1153,7 +1153,7 @@ begin
     if VirtualQuery(PByte(MainInstance + $1000), MemInfo, SizeOf(MemInfo)) = SizeOf(MemInfo) then
     begin
       JsonMemInfoMainBlockStart := MemInfo.AllocationBase;
-      JsonMemInfoMainBlockEnd := JsonMemInfoBlockStart + MemInfo.RegionSize;
+      JsonMemInfoMainBlockEnd := JsonMemInfoMainBlockStart + MemInfo.RegionSize;
     end;
   end;
 end;
