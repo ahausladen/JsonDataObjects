@@ -64,7 +64,12 @@
       "compiler": "10.3",
       "platforms": "Win32, Win64,Linux",
       "template": "default"
-    }
+    },
+    {
+      "compiler": "10.4",
+      "platforms": "Win32, Win64,Linux",
+      "template": "default"
+    }    
   ],
   "templates": [
     {
