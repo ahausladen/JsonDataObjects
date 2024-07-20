@@ -1448,50 +1448,6 @@ begin
 end;
 {$ENDIF MSWINDOWS}
 
-class function TJsonBaseObject.UtcDateTimeToJSON(const UtcDateTime: TDateTime): string;
-var
-  Year, Month, Day, Hour, Minute, Second, Milliseconds: Word;
-begin
-  DecodeDate(UtcDateTime, Year, Month, Day);
-  DecodeTime(UtcDateTime, Hour, Minute, Second, MilliSeconds);
-  Result := Format('%.4d-%.2d-%.2dT%.2d:%.2d:%.2d.%dZ',
-    [Year, Month, Day, Hour, Minute, Second, Milliseconds]);
-end;
-
-function TJsonBaseObject.Clone: TJsonBaseObject;
-begin
-  if Self is TJsonArray then
-    Result := TJsonArray(Self).Clone
-  else
-    Result := TJsonObject(Self).Clone;
-end;
-
-class function TJsonBaseObject.DateTimeToJSON(const Value: TDateTime; UseUtcTime: Boolean): string;
-{$IFDEF MSWINDOWS}
-var
-  LocalTime, UtcTime: TSystemTime;
-begin
-  if UseUtcTime then
-  begin
-    DateTimeToSystemTime(Value, LocalTime);
-    if not TzSpecificLocalTimeToSystemTime(nil, LocalTime, UtcTime) then
-      UtcTime := LocalTime;
-    Result := Format('%.4d-%.2d-%.2dT%.2d:%.2d:%.2d.%dZ',
-      [UtcTime.wYear, UtcTime.wMonth, UtcTime.wDay,
-       UtcTime.wHour, UtcTime.wMinute, UtcTime.wSecond, UtcTime.wMilliseconds]);
-  end
-  else
-    Result := DateTimeToISO8601(Value);
-end;
-{$ELSE}
-begin
-  if UseUtcTime then
-    Result := UtcDateTimeToJSON(TTimeZone.Local.ToUniversalTime(Value))
-  else
-    Result := DateTimeToISO8601(Value);
-end;
-{$ENDIF MSWINDOWS}
-
 function ParseDateTimePart(P: PChar; var Value: Integer; MaxLen: Integer): PChar;
 var
   V: Integer;
@@ -1529,104 +1485,6 @@ begin
   else
     ErrorUnsupportedVariantType(AVarType);
     Result := jdtNone;
-  end;
-end;
-
-class function TJsonBaseObject.JSONToDateTime(const Value: string; ConvertToLocalTime: Boolean): TDateTime;
-var
-  P: PChar;
-  MSecsSince1970: Int64;
-  Year, Month, Day, Hour, Min, Sec, MSec: Integer;
-  OffsetHour, OffsetMin: Integer;
-  Sign: Double;
-begin
-  Result := 0;
-  if Value = '' then
-    Exit;
-
-  P := PChar(Value);
-  if (P^ = '/') and (StrLComp('Date(', P + 1, 5) = 0) then  // .NET: milliseconds since 1970-01-01
-  begin
-    Inc(P, 6);
-    MSecsSince1970 := 0;
-    while (P^ <> #0) and (P^ in ['0'..'9']) do
-    begin
-      MSecsSince1970 := MSecsSince1970 * 10 + (Ord(P^) - Ord('0'));
-      Inc(P);
-    end;
-    if (P^ = '+') or (P^ = '-') then // timezone information
-    begin
-      Inc(P);
-      while (P^ <> #0) and (P^ in ['0'..'9']) do
-        Inc(P);
-    end;
-    if (P[0] = ')') and (P[1] = '/') and (P[2] = #0) then
-    begin
-      Result := UnixDateDelta + (MSecsSince1970 / MSecsPerDay);
-      if ConvertToLocalTime then
-        Result := UtcDateTimeToLocalDateTime(Result);
-    end
-    else
-      Result := 0; // invalid format
-  end
-  else
-  begin
-    // "2015-02-01T16:08:19.202Z"
-    if P^ = '-' then // negative year
-      Inc(P);
-    P := ParseDateTimePart(P, Year, 4);
-    if P^ <> '-' then
-      Exit; // invalid format
-    P := ParseDateTimePart(P + 1, Month, 2);
-    if P^ <> '-' then
-      Exit; // invalid format
-    P := ParseDateTimePart(P + 1, Day, 2);
-
-    Hour := 0;
-    Min := 0;
-    Sec := 0;
-    MSec := 0;
-    Result := EncodeDate(Year, Month, Day);
-
-    if P^ = 'T' then
-    begin
-      P := ParseDateTimePart(P + 1, Hour, 2);
-      if P^ <> ':' then
-        Exit; // invalid format
-      P := ParseDateTimePart(P + 1, Min, 2);
-      if P^ = ':' then
-      begin
-        P := ParseDateTimePart(P + 1, Sec, 2);
-        if P^ = '.' then
-          P := ParseDateTimePart(P + 1, MSec, 3);
-      end;
-      Result := Result + EncodeTime(Hour, Min, Sec, MSec);
-      if (P^ <> 'Z') and (P^ <> #0) then
-      begin
-        if (P^ = '+') or (P^ = '-') then
-        begin
-          if P^ = '+' then
-            Sign := -1 //  +0100 means that the time is 1 hour later than UTC
-          else
-            Sign := 1;
-
-          P := ParseDateTimePart(P + 1, OffsetHour, 2);
-          if P^ = ':' then
-            Inc(P);
-          ParseDateTimePart(P, OffsetMin, 2);
-
-          Result := Result + (EncodeTime(OffsetHour, OffsetMin, 0, 0) * Sign);
-        end
-        else
-        begin
-          Result := 0; // invalid format
-          Exit;
-        end;
-      end;
-
-      if ConvertToLocalTime then
-        Result := UtcDateTimeToLocalDateTime(Result);
-    end;
   end;
 end;
 
@@ -2994,6 +2852,148 @@ begin
   //Result := inherited __ObjAddRef;
 end;
 {$ENDIF USE_FAST_AUTOREFCOUNT}
+
+class function TJsonBaseObject.UtcDateTimeToJSON(const UtcDateTime: TDateTime): string;
+var
+  Year, Month, Day, Hour, Minute, Second, Milliseconds: Word;
+begin
+  DecodeDate(UtcDateTime, Year, Month, Day);
+  DecodeTime(UtcDateTime, Hour, Minute, Second, MilliSeconds);
+  Result := Format('%.4d-%.2d-%.2dT%.2d:%.2d:%.2d.%dZ',
+    [Year, Month, Day, Hour, Minute, Second, Milliseconds]);
+end;
+
+function TJsonBaseObject.Clone: TJsonBaseObject;
+begin
+  if Self is TJsonArray then
+    Result := TJsonArray(Self).Clone
+  else
+    Result := TJsonObject(Self).Clone;
+end;
+
+class function TJsonBaseObject.DateTimeToJSON(const Value: TDateTime; UseUtcTime: Boolean): string;
+{$IFDEF MSWINDOWS}
+var
+  LocalTime, UtcTime: TSystemTime;
+begin
+  if UseUtcTime then
+  begin
+    DateTimeToSystemTime(Value, LocalTime);
+    if not TzSpecificLocalTimeToSystemTime(nil, LocalTime, UtcTime) then
+      UtcTime := LocalTime;
+    Result := Format('%.4d-%.2d-%.2dT%.2d:%.2d:%.2d.%dZ',
+      [UtcTime.wYear, UtcTime.wMonth, UtcTime.wDay,
+       UtcTime.wHour, UtcTime.wMinute, UtcTime.wSecond, UtcTime.wMilliseconds]);
+  end
+  else
+    Result := DateTimeToISO8601(Value);
+end;
+{$ELSE}
+begin
+  if UseUtcTime then
+    Result := UtcDateTimeToJSON(TTimeZone.Local.ToUniversalTime(Value))
+  else
+    Result := DateTimeToISO8601(Value);
+end;
+{$ENDIF MSWINDOWS}
+
+class function TJsonBaseObject.JSONToDateTime(const Value: string; ConvertToLocalTime: Boolean): TDateTime;
+var
+  P: PChar;
+  MSecsSince1970: Int64;
+  Year, Month, Day, Hour, Min, Sec, MSec: Integer;
+  OffsetHour, OffsetMin: Integer;
+  Sign: Double;
+begin
+  Result := 0;
+  if Value = '' then
+    Exit;
+
+  P := PChar(Value);
+  if (P^ = '/') and (StrLComp('Date(', P + 1, 5) = 0) then  // .NET: milliseconds since 1970-01-01
+  begin
+    Inc(P, 6);
+    MSecsSince1970 := 0;
+    while (P^ <> #0) and (P^ in ['0'..'9']) do
+    begin
+      MSecsSince1970 := MSecsSince1970 * 10 + (Ord(P^) - Ord('0'));
+      Inc(P);
+    end;
+    if (P^ = '+') or (P^ = '-') then // timezone information
+    begin
+      Inc(P);
+      while (P^ <> #0) and (P^ in ['0'..'9']) do
+        Inc(P);
+    end;
+    if (P[0] = ')') and (P[1] = '/') and (P[2] = #0) then
+    begin
+      Result := UnixDateDelta + (MSecsSince1970 / MSecsPerDay);
+      if ConvertToLocalTime then
+        Result := UtcDateTimeToLocalDateTime(Result);
+    end
+    else
+      Result := 0; // invalid format
+  end
+  else
+  begin
+    // "2015-02-01T16:08:19.202Z"
+    if P^ = '-' then // negative year
+      Inc(P);
+    P := ParseDateTimePart(P, Year, 4);
+    if P^ <> '-' then
+      Exit; // invalid format
+    P := ParseDateTimePart(P + 1, Month, 2);
+    if P^ <> '-' then
+      Exit; // invalid format
+    P := ParseDateTimePart(P + 1, Day, 2);
+
+    Hour := 0;
+    Min := 0;
+    Sec := 0;
+    MSec := 0;
+    Result := EncodeDate(Year, Month, Day);
+
+    if P^ = 'T' then
+    begin
+      P := ParseDateTimePart(P + 1, Hour, 2);
+      if P^ <> ':' then
+        Exit; // invalid format
+      P := ParseDateTimePart(P + 1, Min, 2);
+      if P^ = ':' then
+      begin
+        P := ParseDateTimePart(P + 1, Sec, 2);
+        if P^ = '.' then
+          P := ParseDateTimePart(P + 1, MSec, 3);
+      end;
+      Result := Result + EncodeTime(Hour, Min, Sec, MSec);
+      if (P^ <> 'Z') and (P^ <> #0) then
+      begin
+        if (P^ = '+') or (P^ = '-') then
+        begin
+          if P^ = '+' then
+            Sign := -1 //  +0100 means that the time is 1 hour later than UTC
+          else
+            Sign := 1;
+
+          P := ParseDateTimePart(P + 1, OffsetHour, 2);
+          if P^ = ':' then
+            Inc(P);
+          ParseDateTimePart(P, OffsetMin, 2);
+
+          Result := Result + (EncodeTime(OffsetHour, OffsetMin, 0, 0) * Sign);
+        end
+        else
+        begin
+          Result := 0; // invalid format
+          Exit;
+        end;
+      end;
+
+      if ConvertToLocalTime then
+        Result := UtcDateTimeToLocalDateTime(Result);
+    end;
+  end;
+end;
 
 class procedure TJsonBaseObject.StrToJSONStr(const AppendMethod: TWriterAppendMethod; const S: string);
 var
