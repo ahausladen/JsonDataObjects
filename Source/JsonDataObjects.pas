@@ -7079,6 +7079,8 @@ begin
   Result.FData.FName := '';
   Result.FData.FNameResolver := nil;
   Result.FData.FIntern := nil;
+  if Result.FData.FValue <> '' then
+    Result.FData.FValue := '';
   {$IFDEF AUTOREFCOUNT}
   if Result.FData.FObj <> nil then
     Result.FData.FObj := nil;
@@ -7117,6 +7119,8 @@ begin
   Result.FData.FName := '';
   Result.FData.FNameResolver := nil;
   Result.FData.FIntern := nil;
+  if Result.FData.FValue <> '' then
+    Result.FData.FValue := '';
   {$IFDEF AUTOREFCOUNT}
   if Result.FData.FObj <> nil then
     Result.FData.FObj := nil;
@@ -7155,6 +7159,8 @@ end;
 //  Result.FData.FName := '';
 //  Result.FData.FNameResolver := nil;
 //  Result.FData.FIntern := nil;
+//  if Result.FData.FValue <> '' then
+//    Result.FData.FValue := '';
 //  {$IFDEF AUTOREFCOUNT}
 //  if Result.FData.FObj <> nil then
 //    Result.FData.FObj := nil;
@@ -7193,6 +7199,8 @@ begin
   Result.FData.FName := '';
   Result.FData.FNameResolver := nil;
   Result.FData.FIntern := nil;
+  if Result.FData.FValue <> '' then
+    Result.FData.FValue := '';
   {$IFDEF AUTOREFCOUNT}
   if Result.FData.FObj <> nil then
     Result.FData.FObj := nil;
@@ -7231,6 +7239,8 @@ begin
   Result.FData.FName := '';
   Result.FData.FNameResolver := nil;
   Result.FData.FIntern := nil;
+  if Result.FData.FValue <> '' then
+    Result.FData.FValue := '';
   {$IFDEF AUTOREFCOUNT}
   if Result.FData.FObj <> nil then
     Result.FData.FObj := nil;
@@ -7269,6 +7279,8 @@ begin
   Result.FData.FName := '';
   Result.FData.FNameResolver := nil;
   Result.FData.FIntern := nil;
+  if Result.FData.FValue <> '' then
+    Result.FData.FValue := '';
   {$IFDEF AUTOREFCOUNT}
   if Result.FData.FObj <> nil then
     Result.FData.FObj := nil;
@@ -7309,6 +7321,8 @@ begin
   Result.FData.FName := '';
   Result.FData.FNameResolver := nil;
   Result.FData.FIntern := nil;
+  if Result.FData.FValue <> '' then
+    Result.FData.FValue := '';
   {$IFDEF AUTOREFCOUNT}
   if Result.FData.FObj <> nil then
     Result.FData.FObj := nil;
@@ -7347,10 +7361,8 @@ begin
   Result.FData.FName := '';
   Result.FData.FNameResolver := nil;
   Result.FData.FIntern := nil;
-  {$IFDEF AUTOREFCOUNT}
   if Result.FData.FValue <> '' then
     Result.FData.FValue := '';
-  {$ENDIF AUTOREFCOUNT}
   Result.FData.FTyp := jdtArray;
   Result.FData.FObj := Value;
 end;
@@ -7375,10 +7387,8 @@ begin
   Result.FData.FName := '';
   Result.FData.FNameResolver := nil;
   Result.FData.FIntern := nil;
-  {$IFDEF AUTOREFCOUNT}
   if Result.FData.FValue <> '' then
     Result.FData.FValue := '';
-  {$ENDIF AUTOREFCOUNT}
   Result.FData.FTyp := jdtObject;
   Result.FData.FObj := Value;
 end;
@@ -7403,10 +7413,8 @@ begin
   Result.FData.FName := '';
   Result.FData.FNameResolver := nil;
   Result.FData.FIntern := nil;
-  {$IFDEF AUTOREFCOUNT}
   if Result.FData.FValue <> '' then
     Result.FData.FValue := '';
-  {$ENDIF AUTOREFCOUNT}
   Result.FData.FTyp := jdtObject;
   Result.FData.FObj := nil;
 end;
@@ -7454,6 +7462,8 @@ begin
   Result.FData.FName := '';
   Result.FData.FNameResolver := nil;
   Result.FData.FIntern := nil;
+  if Result.FData.FValue <> '' then
+    Result.FData.FValue := '';
   {$IFDEF AUTOREFCOUNT}
   if Result.FData.FObj <> nil then
     Result.FData.FObj := nil;
@@ -7465,7 +7475,7 @@ begin
     Result.FData.FTyp := LTyp;
     case LTyp of
       jdtString:
-        string(Result.FData.FValue) := Value;
+        Result.FData.FValue := Value;
       jdtInt:
         Result.FData.FIntValue := Value;
       jdtLong:
@@ -7478,6 +7488,10 @@ begin
         Result.FData.FDateTimeValue := Value;
       jdtBool:
         Result.FData.FBoolValue := Value;
+      {$IFNDEF AUTOREFCOUNT}
+      jdtObject:
+        Result.FData.FObj := nil;
+      {$ENDIF ~AUTOREFCOUNT}
     end;
   end;
 end;
@@ -7563,6 +7577,8 @@ begin
     FData.FName := '';
     FData.FNameResolver := nil;
     FData.FIntern := nil;
+    if FData.FValue <> '' then
+      FData.FValue := '';
     {$IFDEF AUTOREFCOUNT}
     if FData.FObj <> nil then
       FData.FObj := nil;
@@ -7637,6 +7653,8 @@ begin
     FData.FName := '';
     FData.FNameResolver := nil;
     FData.FIntern := nil;
+    if FData.FValue <> '' then
+      FData.FValue := '';
     {$IFDEF AUTOREFCOUNT}
     if FData.FObj <> nil then
       FData.FObj := nil;
