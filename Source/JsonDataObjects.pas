@@ -2804,9 +2804,20 @@ begin
   end;
 end;
 
-function DoubleToText(Buffer: PChar; const Value: Extended): Integer; inline;
+function DoubleToText(Buffer: PChar; const Value: Extended): Integer; {inline;}
+var
+  I: Integer;
 begin
   Result := FloatToText(Buffer, Value, fvExtended, ffGeneral, 15, 0, JSONFormatSettings);
+
+  // Add the decimal separator if FloatToText didn't add it, so that the data type of
+  // the property doesn't change to Integer/Int64 if it is read again.
+  for I := Result - 1 downto 0 do
+    if Buffer[I] = '.' then
+      Exit;
+  Buffer[Result] := '.';
+  Buffer[Result + 1] := '0';
+  Inc(Result, 2);
 end;
 
 const
@@ -2904,7 +2915,7 @@ end;
 
 procedure TJsonDataValue.InternToJSON(var Writer: TJsonOutputWriter);
 var
-  Buffer: array[0..63] of Char;
+  Buffer: array[0..63 + 2] of Char;
   P, BufEnd: PChar;
 begin
   case FTyp of

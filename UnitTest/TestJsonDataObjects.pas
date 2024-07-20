@@ -56,6 +56,7 @@ type
     procedure TestLoadFromStream;
     procedure TestSaveToStream;
     procedure TestSaveToLines;
+    procedure TestDoubleDotZeroWrite;
     procedure TestToJSON;
     procedure TestToString;
     procedure TestDateTimeToJSON;
@@ -1686,6 +1687,25 @@ begin
   try
     CheckEquals(dt, O.D['DateTime']);
     CheckEquals(dt, O.DUtc['UtcDateTime']);
+  finally
+    O.Free;
+  end;
+end;
+
+procedure TestTJsonBaseObject.TestDoubleDotZeroWrite;
+var
+  O: TJsonObject;
+begin
+  O := TJsonObject.Create;
+  try
+    O.FromUtf8JSON('{ "data": 1.0 }');
+    CheckEquals('{"data":1.0}', O.ToUtf8JSON(True));
+
+    O.FromUtf8JSON('{ "data": 1 }');
+    CheckEquals('{"data":1}', O.ToUtf8JSON(True));
+
+    O.FromUtf8JSON('{ "data": 1.123 }');
+    CheckEquals('{"data":1.123}', O.ToUtf8JSON(True));
   finally
     O.Free;
   end;
