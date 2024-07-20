@@ -838,6 +838,7 @@ type
     IndentChar: string;
     UseUtcTime: Boolean;
     NullConvertsToValueTypes: Boolean;
+    EscapeAllNonASCIIChars: Boolean;
   end;
 
   // Rename classes because RTL classes have the same name
@@ -851,6 +852,7 @@ var
     IndentChar: #9;
     UseUtcTime: True;
     NullConvertsToValueTypes: False;  // If True and an object is nil/null, a convertion to String, Int, Long, Float, DateTime, Boolean will return ''/0/False
+    EscapeAllNonASCIIChars: False;  // If True all characters >= #128 will be escaped when generating the JSON string
   );
 
 implementation
@@ -3008,12 +3010,25 @@ begin
 //    DCC64 generates "bt mem,reg" code
 //    while (P < EndP) and not (P^ in [#0..#31, '\', '"' {$IFDEF ESCAPE_SLASH_AFTER_LESSTHAN}, '/'{$ENDIF}]) do
 //      Inc(P);
-    while P < EndP do
-      case P^ of
-        #0..#31, '\', '"' {$IFDEF ESCAPE_SLASH_AFTER_LESSTHAN}, '/'{$ENDIF}: Break;
-      else
-        Inc(P);
-      end;
+
+    if JsonSerializationConfig.EscapeAllNonASCIIChars then
+    begin
+      while P < EndP do
+        case Ord(P^) of
+          0..31, Ord('\'), Ord('"') {$IFDEF ESCAPE_SLASH_AFTER_LESSTHAN}, Ord('/'){$ENDIF}, $0080..$FFFF: Break;
+        else
+          Inc(P);
+        end;
+    end
+    else
+    begin
+      while P < EndP do
+        case P^ of
+          #0..#31, '\', '"' {$IFDEF ESCAPE_SLASH_AFTER_LESSTHAN}, '/'{$ENDIF}: Break;
+        else
+          Inc(P);
+        end;
+    end;
 
     // nothing found, than it is easy
     if P = EndP then
@@ -3090,17 +3105,36 @@ begin
             end;
           {$ENDIF ESCAPE_SLASH_AFTER_LESSTHAN}
         end;
+        if (Ord(Ch) >= $0080) and JsonSerializationConfig.EscapeAllNonASCIIChars then
+        begin
+          Buf.Append('\u', 2);
+          Buf.Append2(HexChars[(Word(Ch) shr 12) and $F], HexChars[(Word(Ch) shr 8) and $F]);
+          Buf.Append2(HexChars[(Word(Ch) shr 4) and $F], HexChars[Word(Ch) and $F]);
+        end;
+
         Inc(P);
         F := P;
-//        DCC64 generates "bt mem,reg" code
-//        while (P < EndP) and not (P^ in [#0..#31, '\', '"' {$IFDEF ESCAPE_SLASH_AFTER_LESSTHAN}, '/'{$ENDIF}]) do
-//          Inc(P);
-        while P < EndP do
-          case P^ of
-            #0..#31, '\', '"' {$IFDEF ESCAPE_SLASH_AFTER_LESSTHAN}, '/'{$ENDIF}: Break;
-          else
-            Inc(P);
-          end;
+        if JsonSerializationConfig.EscapeAllNonASCIIChars then
+        begin
+          while P < EndP do
+            case Ord(P^) of
+              0..31, Ord('\'), Ord('"') {$IFDEF ESCAPE_SLASH_AFTER_LESSTHAN}, Ord('/'){$ENDIF}, $80..$FFFF: Break;
+            else
+              Inc(P);
+            end;
+        end
+        else
+        begin
+  //        DCC64 generates "bt mem,reg" code
+  //        while (P < EndP) and not (P^ in [#0..#31, '\', '"' {$IFDEF ESCAPE_SLASH_AFTER_LESSTHAN}, '/'{$ENDIF}]) do
+  //          Inc(P);
+          while P < EndP do
+            case P^ of
+              #0..#31, '\', '"' {$IFDEF ESCAPE_SLASH_AFTER_LESSTHAN}, '/'{$ENDIF}: Break;
+            else
+              Inc(P);
+            end;
+        end;
       end
       else
         Break;
