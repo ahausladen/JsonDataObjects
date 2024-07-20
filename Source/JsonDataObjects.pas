@@ -141,7 +141,7 @@ uses
   {$ENDIF HAS_UNIT_SCOPE}
 
 {$HPPEMIT '#pragma link "Jsondataobjects"'}
-  
+
 type
   TJsonBaseObject = class;
   TJsonObject = class;
@@ -171,6 +171,33 @@ type
     property Position: NativeInt read FPosition; // base 0  Utf8Char/WideChar index
   end;
 
+  TJsonSerializationConfig = record
+  public
+    // LineBreak specifies what characters are used for line breaks in "Compact=False" mode.
+    // Default: #10
+    LineBreak: string;
+    // IndentChar specifies what characters are used to indent lines in "Compact=False" mode.
+    // Default: #9
+    IndentChar: string;
+    // If UseUtcTime is True, all TDateTime values will written in UTC timezone converted from the
+    // local timezone in the JSON string. Otherwise the timezone offset to the local timezone will
+    // be included.
+    // Default: True
+    UseUtcTime: Boolean;
+    // If EscapeAllNonASCIIChars is True, all characters >=#128 will be escaped when generating
+    // the JSON string.
+    // Default: False
+    EscapeAllNonASCIIChars: Boolean;
+
+    procedure InitDefaults;
+    class function Default: TJsonSerializationConfig; static;
+  public
+    // If NullConvertsToValueTypes is True and an object is nil/null, a convertion to String, Int,
+    // Long, Float, DateTime, Boolean will return ''/0/False
+    // Default: False
+    NullConvertsToValueTypes: Boolean; // Isn't use for serialization. Should default to True and be deprecated.
+  end;
+
   {$IFDEF SUPPORT_PROGRESS}
   TJsonReaderProgressProc = procedure(Data: Pointer; Percentage: Integer; Position, Size: NativeInt);
 
@@ -186,6 +213,7 @@ type
 
   // TJsonOutputWriter is used to write the JSON data to a string, stream or TStrings in a compact
   // or human readable format.
+  PJsonOutputWriter = ^TJsonOutputWriter;
   TJsonOutputWriter = record
   private type
     TLastType = (ltInitial, ltIndent, ltUnindent, ltIntro, ltValue, ltSeparator);
@@ -226,6 +254,7 @@ type
     FStringBuffer: TJsonStringBuilder;
     FLines: TStrings;
     FLastLine: TJsonStringBuilder;
+    FConfig: TJsonSerializationConfig;
 
     FStreamEncodingBuffer: PByte;
     FStreamEncodingBufferLen: NativeInt;
@@ -243,7 +272,8 @@ type
     procedure AppendLine(AppendOn: TLastType; P: PChar; Len: Integer); overload; inline;
     procedure FlushLastLine;
   private // unit private
-    procedure Init(ACompact: Boolean; AStream: TStream; AEncoding: TEncoding; ALines: TStrings);
+    procedure Init(ACompact: Boolean; AStream: TStream; AEncoding: TEncoding; ALines: TStrings;
+      const Config: TJsonSerializationConfig);
     function Done: string;
     procedure StreamDone;
     procedure LinesDone;
@@ -530,9 +560,12 @@ type
 
     procedure LoadFromFile(const FileName: string; Utf8WithoutBOM: Boolean = True{$IFDEF SUPPORT_PROGRESS}; AProgress: PJsonReaderProgressRec = nil{$ENDIF});
     procedure LoadFromStream(Stream: TStream; Encoding: TEncoding = nil; Utf8WithoutBOM: Boolean = True{$IFDEF SUPPORT_PROGRESS}; AProgress: PJsonReaderProgressRec = nil{$ENDIF});
-    procedure SaveToFile(const FileName: string; Compact: Boolean = True; Encoding: TEncoding = nil; Utf8WithoutBOM: Boolean = True);
-    procedure SaveToStream(Stream: TStream; Compact: Boolean = True; Encoding: TEncoding = nil; Utf8WithoutBOM: Boolean = True);
-    procedure SaveToLines(Lines: TStrings);
+    procedure SaveToFile(const FileName: string; Compact: Boolean = True; Encoding: TEncoding = nil; Utf8WithoutBOM: Boolean = True); overload; inline;
+    procedure SaveToFile(const FileName: string; const Config: TJsonSerializationConfig; Compact: Boolean = True; Encoding: TEncoding = nil; Utf8WithoutBOM: Boolean = True); overload;
+    procedure SaveToStream(Stream: TStream; Compact: Boolean = True; Encoding: TEncoding = nil; Utf8WithoutBOM: Boolean = True); overload; inline;
+    procedure SaveToStream(Stream: TStream; const Config: TJsonSerializationConfig; Compact: Boolean = True; Encoding: TEncoding = nil; Utf8WithoutBOM: Boolean = True); overload;
+    procedure SaveToLines(Lines: TStrings); overload; inline;
+    procedure SaveToLines(Lines: TStrings; const Config: TJsonSerializationConfig); overload;
 
     // FromXxxJSON() raises an EJsonParserException if you try to parse an array JSON string into a
     // TJsonObject or a object JSON string into a TJsonArray.
@@ -544,11 +577,14 @@ type
     procedure FromJSON(const S: UnicodeString{$IFDEF SUPPORT_PROGRESS}; AProgress: PJsonReaderProgressRec = nil{$ENDIF}); overload;
     procedure FromJSON(S: PWideChar; Len: Integer = -1{$IFDEF SUPPORT_PROGRESS}; AProgress: PJsonReaderProgressRec = nil{$ENDIF}); overload;
 
-    function ToJSON(Compact: Boolean = True): string;
+    function ToJSON(Compact: Boolean = True): string; overload; inline;
+    function ToJSON(const Config: TJsonSerializationConfig; Compact: Boolean = True): string; overload;
     {$IFDEF SUPPORTS_UTF8STRING}
-    function ToUtf8JSON(Compact: Boolean = True): UTF8String; overload;
+    function ToUtf8JSON(Compact: Boolean = True): UTF8String; overload; inline;
+    function ToUtf8JSON(const Config: TJsonSerializationConfig; Compact: Boolean = True): UTF8String; overload;
     {$ENDIF SUPPORTS_UTF8STRING}
-    procedure ToUtf8JSON(var Bytes: TBytes; Compact: Boolean = True); {$IFDEF SUPPORTS_UTF8STRING}overload;{$ENDIF}
+    procedure ToUtf8JSON(var Bytes: TBytes; Compact: Boolean = True); overload; inline;
+    procedure ToUtf8JSON(var Bytes: TBytes; const Config: TJsonSerializationConfig; Compact: Boolean = True); overload;
     // ToString() returns a compact JSON string
     function ToString: string; override;
 
@@ -833,14 +869,6 @@ type
     property Capacity: Integer read FCapacity write SetCapacity;
   end;
 
-  TJsonSerializationConfig = record
-    LineBreak: string;
-    IndentChar: string;
-    UseUtcTime: Boolean;
-    NullConvertsToValueTypes: Boolean;
-    EscapeAllNonASCIIChars: Boolean;
-  end;
-
   // Rename classes because RTL classes have the same name
   TJDOJsonBaseObject = TJsonBaseObject;
   TJDOJsonObject = TJsonObject;
@@ -851,8 +879,8 @@ var
     LineBreak: #10;
     IndentChar: #9;
     UseUtcTime: True;
-    NullConvertsToValueTypes: False;  // If True and an object is nil/null, a convertion to String, Int, Long, Float, DateTime, Boolean will return ''/0/False
     EscapeAllNonASCIIChars: False;  // If True all characters >= #128 will be escaped when generating the JSON string
+    NullConvertsToValueTypes: False;  // If True and an object is nil/null, a convertion to String, Int, Long, Float, DateTime, Boolean will return ''/0/False
   );
 
 implementation
@@ -1546,6 +1574,22 @@ begin
   end
   else
     SetLength(S, OldLen);
+end;
+
+{ TJsonSerializationConfig }
+
+procedure TJsonSerializationConfig.InitDefaults;
+begin
+  LineBreak := #10;
+  IndentChar := #9;
+  UseUtcTime := True;
+  EscapeAllNonASCIIChars := False;
+  NullConvertsToValueTypes := False;
+end;
+
+class function TJsonSerializationConfig.Default: TJsonSerializationConfig;
+begin
+  Result.InitDefaults;
 end;
 
 {$IFDEF SUPPORT_PROGRESS}
@@ -3011,7 +3055,7 @@ begin
 //    while (P < EndP) and not (P^ in [#0..#31, '\', '"' {$IFDEF ESCAPE_SLASH_AFTER_LESSTHAN}, '/'{$ENDIF}]) do
 //      Inc(P);
 
-    if JsonSerializationConfig.EscapeAllNonASCIIChars then
+    if PJsonOutputWriter(TMethod(AppendMethod).Data).FConfig.EscapeAllNonASCIIChars then
     begin
       while P < EndP do
         case Ord(P^) of
@@ -3044,7 +3088,7 @@ class procedure TJsonBaseObject.DateTimeToJSONStr(const AppendMethod: TWriterApp
 var
   S: string;
 begin
-  S := TJsonBaseObject.DateTimeToJSON(Value, JsonSerializationConfig.UseUtcTime);
+  S := TJsonBaseObject.DateTimeToJSON(Value, PJsonOutputWriter(TMethod(AppendMethod).Data).FConfig.UseUtcTime);
   // StrToJSONStr isn't necessary because the date-time string doesn't contain any char
   // that must be escaped.
   AppendMethod(PChar(S), Length(S));
@@ -3069,10 +3113,13 @@ var
   {$IFDEF ESCAPE_SLASH_AFTER_LESSTHAN}
   StartP: PChar;
   {$ENDIF ESCAPE_SLASH_AFTER_LESSTHAN}
+  EscapeAllNonASCIIChars: Boolean;
 begin
   {$IFDEF ESCAPE_SLASH_AFTER_LESSTHAN}
   StartP := F;
   {$ENDIF ESCAPE_SLASH_AFTER_LESSTHAN}
+
+  EscapeAllNonASCIIChars := PJsonOutputWriter(TMethod(AppendMethod).Data).FConfig.EscapeAllNonASCIIChars;
 
   Buf.Init;
   try
@@ -3105,7 +3152,7 @@ begin
             end;
           {$ENDIF ESCAPE_SLASH_AFTER_LESSTHAN}
         end;
-        if (Ord(Ch) >= $0080) and JsonSerializationConfig.EscapeAllNonASCIIChars then
+        if (Ord(Ch) >= $0080) and EscapeAllNonASCIIChars then
         begin
           Buf.Append('\u', 2);
           Buf.Append2(HexChars[(Word(Ch) shr 12) and $F], HexChars[(Word(Ch) shr 8) and $F]);
@@ -3114,7 +3161,7 @@ begin
 
         Inc(P);
         F := P;
-        if JsonSerializationConfig.EscapeAllNonASCIIChars then
+        if EscapeAllNonASCIIChars then
         begin
           while P < EndP do
             case Ord(P^) of
@@ -3522,19 +3569,33 @@ begin
   end;
 end;
 
-procedure TJsonBaseObject.SaveToFile(const FileName: string; Compact: Boolean; Encoding: TEncoding; Utf8WithoutBOM: Boolean);
+procedure TJsonBaseObject.SaveToFile(const FileName: string; Compact: Boolean; Encoding: TEncoding;
+  Utf8WithoutBOM: Boolean);
+begin
+  SaveToFile(FileName, JsonSerializationConfig, Compact, Encoding, Utf8WithoutBOM);
+end;
+
+procedure TJsonBaseObject.SaveToFile(const FileName: string; const Config: TJsonSerializationConfig;
+  Compact: Boolean; Encoding: TEncoding; Utf8WithoutBOM: Boolean);
 var
   Stream: TStream;
 begin
   Stream := TFileStream.Create(FileName, fmCreate or fmShareDenyWrite);
   try
-    SaveToStream(Stream, Compact, Encoding, Utf8WithoutBOM);
+    SaveToStream(Stream, Config, Compact, Encoding, Utf8WithoutBOM);
   finally
     Stream.Free;
   end;
 end;
 
-procedure TJsonBaseObject.SaveToStream(Stream: TStream; Compact: Boolean; Encoding: TEncoding; Utf8WithoutBOM: Boolean);
+procedure TJsonBaseObject.SaveToStream(Stream: TStream; Compact: Boolean; Encoding: TEncoding;
+  Utf8WithoutBOM: Boolean);
+begin
+  SaveToStream(Stream, JsonSerializationConfig, Compact, Encoding, Utf8WithoutBOM);
+end;
+
+procedure TJsonBaseObject.SaveToStream(Stream: TStream; const Config: TJsonSerializationConfig;
+  Compact: Boolean; Encoding: TEncoding; Utf8WithoutBOM: Boolean);
 var
   Preamble: TBytes;
   Writer: TJsonOutputWriter;
@@ -3551,7 +3612,7 @@ begin
       Stream.Write(Preamble[0], Length(Preamble));
   end;
 
-  Writer.Init(Compact, Stream, Encoding, nil);
+  Writer.Init(Compact, Stream, Encoding, nil, Config);
   try
     InternToJSON(Writer);
   finally
@@ -3560,10 +3621,15 @@ begin
 end;
 
 procedure TJsonBaseObject.SaveToLines(Lines: TStrings);
+begin
+  SaveToLines(Lines, JsonSerializationConfig);
+end;
+
+procedure TJsonBaseObject.SaveToLines(Lines: TStrings; const Config: TJsonSerializationConfig);
 var
   Writer: TJsonOutputWriter;
 begin
-  Writer.Init(False, nil, nil, Lines);
+  Writer.Init(False, nil, nil, Lines, Config);
   try
     InternToJSON(Writer);
   finally
@@ -3572,10 +3638,15 @@ begin
 end;
 
 function TJsonBaseObject.ToJSON(Compact: Boolean): string;
+begin
+  Result := ToJSON(JsonSerializationConfig, Compact);
+end;
+
+function TJsonBaseObject.ToJSON(const Config: TJsonSerializationConfig; Compact: Boolean): string;
 var
   Writer: TJsonOutputWriter;
 begin
-  Writer.Init(Compact, nil, nil, nil);
+  Writer.Init(Compact, nil, nil, nil, Config);
   try
     InternToJSON(Writer);
   finally
@@ -3584,14 +3655,19 @@ begin
 end;
 
 {$IFDEF SUPPORTS_UTF8STRING}
-function TJsonBaseObject.ToUtf8JSON(Compact: Boolean = True): UTF8String;
+function TJsonBaseObject.ToUtf8JSON(Compact: Boolean): UTF8String;
+begin
+  Result := ToUtf8JSON(JsonSerializationConfig, Compact);
+end;
+
+function TJsonBaseObject.ToUtf8JSON(const Config: TJsonSerializationConfig; Compact: Boolean): UTF8String;
 var
   Stream: TJsonUtf8StringStream;
   Size: NativeInt;
 begin
   Stream := TJsonUtf8StringStream.Create;
   try
-    SaveToStream(Stream, Compact, nil, True);
+    SaveToStream(Stream, Config, Compact, nil, True);
     Result := Stream.DataString;
     Size := Stream.Size;
   finally
@@ -3602,14 +3678,20 @@ begin
 end;
 {$ENDIF SUPPORTS_UTF8STRING}
 
-procedure TJsonBaseObject.ToUtf8JSON(var Bytes: TBytes; Compact: Boolean = True);
+procedure TJsonBaseObject.ToUtf8JSON(var Bytes: TBytes; Compact: Boolean);
+begin
+  ToUtf8JSON(Bytes, JsonSerializationConfig, Compact);
+end;
+
+procedure TJsonBaseObject.ToUtf8JSON(var Bytes: TBytes; const Config: TJsonSerializationConfig;
+  Compact: Boolean);
 var
   Stream: TJsonBytesStream;
   Size: NativeInt;
 begin
   Stream := TJsonBytesStream.Create;
   try
-    SaveToStream(Stream, Compact, nil, True);
+    SaveToStream(Stream, Config, Compact, nil, True);
     Size := Stream.Size;
     Bytes := Stream.Bytes;
   finally
@@ -5664,11 +5746,13 @@ end;
 
 { TJsonOutputWriter }
 
-procedure TJsonOutputWriter.Init(ACompact: Boolean; AStream: TStream; AEncoding: TEncoding; ALines: TStrings);
+procedure TJsonOutputWriter.Init(ACompact: Boolean; AStream: TStream; AEncoding: TEncoding;
+  ALines: TStrings; const Config: TJsonSerializationConfig);
 begin
   FCompact := ACompact;
   FStream := AStream;
   FEncoding := AEncoding;
+  FConfig := Config;
 
   if ALines <> nil then
   begin
@@ -5695,10 +5779,10 @@ begin
     FIndents := AllocMem(5 * SizeOf(string));
     FIndentsLen := 5;
     //FIndents[0] := '';
-    FIndents[1] := JsonSerializationConfig.IndentChar;
-    FIndents[2] := FIndents[1] + JsonSerializationConfig.IndentChar;
-    FIndents[3] := FIndents[2] + JsonSerializationConfig.IndentChar;
-    FIndents[4] := FIndents[3] + JsonSerializationConfig.IndentChar;
+    FIndents[1] := FConfig.IndentChar;
+    FIndents[2] := FIndents[1] + FIndents[1];
+    FIndents[3] := FIndents[2] + FIndents[1];
+    FIndents[4] := FIndents[3] + FIndents[1];
   end;
 end;
 
@@ -5756,7 +5840,7 @@ begin
     if FLines = nil then
     begin
       FLastLine.FlushToStringBuffer(FStringBuffer);
-      FStringBuffer.Append(JsonSerializationConfig.LineBreak);
+      FStringBuffer.Append(FConfig.LineBreak);
     end
     else
     begin
@@ -5806,7 +5890,7 @@ begin
   Inc(FIndentsLen);
   ReallocMem(Pointer(FIndents), FIndentsLen * SizeOf(string));
   Pointer(FIndents[FIndent]) := nil;
-  FIndents[FIndent] := FIndents[FIndent - 1] + JsonSerializationConfig.IndentChar;
+  FIndents[FIndent] := FIndents[FIndent - 1] + FConfig.IndentChar;
 end;
 
 procedure TJsonOutputWriter.AppendLine(AppendOn: TLastType; const S: string);

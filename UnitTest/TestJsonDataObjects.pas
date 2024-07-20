@@ -70,6 +70,7 @@ type
     procedure TestVariantNull;
     procedure TestUInt64;
     procedure TestProgress;
+    procedure TestToJsonSerializationConfig;
     procedure TestSyntaxErrors;
     procedure TestDateTimeToJsonString;
   end;
@@ -1725,6 +1726,24 @@ begin
     CheckEquals('{"data":"\u0080\u1234"}', O.ToJSON(True));
   finally
     JsonSerializationConfig.EscapeAllNonASCIIChars := False;
+    O.Free;
+  end;
+end;
+
+procedure TestTJsonBaseObject.TestToJsonSerializationConfig;
+var
+  O: TJsonObject;
+  Config: TJsonSerializationConfig;
+begin
+  O := TJsonObject.Create;
+  try
+    Config.InitDefaults;
+    Config.IndentChar := '  ';
+    Config.EscapeAllNonASCIIChars := True;
+
+    O.FromUtf8JSON('{ "data": "\u0080\u1234" }');
+    CheckEquals('{'#10'  "data": "\u0080\u1234"'#10'}'#10, O.ToJSON(Config, False));
+  finally
     O.Free;
   end;
 end;
