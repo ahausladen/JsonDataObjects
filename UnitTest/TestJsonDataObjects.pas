@@ -73,6 +73,7 @@ type
     procedure TestToJsonSerializationConfig;
     procedure TestSyntaxErrors;
     procedure TestDateTimeToJsonString;
+    procedure TestSmallFloatValues;
   end;
 
   TestTJsonArray = class(TTestCase)
@@ -1745,6 +1746,22 @@ begin
     CheckEquals('{'#10'  "data": "\u0080\u1234"'#10'}'#10, O.ToJSON(Config, False));
   finally
     O.Free;
+  end;
+end;
+
+procedure TestTJsonBaseObject.TestSmallFloatValues;
+var
+  Json: TJsonObject;
+  S: string;
+begin
+  // Test for Issue #78
+  Json := TJsonObject.Create;
+  try
+    Json.F['Value'] := 0.00001;
+    S := Json.ToJSON();
+    TJsonObject.Parse(S).Free;
+  finally
+    Json.Free;
   end;
 end;
 
