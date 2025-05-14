@@ -1453,7 +1453,7 @@ var
   Hour, Min, Sec, MSec: Word;
 begin
   DateTimeToSystemTime(Value, LocalTime);
-  Result := Format('%.4d-%.2d-%.2dT%.2d:%.2d:%.2d.%d',
+  Result := Format('%.4d-%.2d-%.2dT%.2d:%.2d:%.2d.%.3d',
     [LocalTime.wYear, LocalTime.wMonth, LocalTime.wDay,
      LocalTime.wHour, LocalTime.wMinute, LocalTime.wSecond, LocalTime.wMilliseconds]);
   if TzSpecificLocalTimeToSystemTime(nil, LocalTime, UtcTime) then
@@ -1475,7 +1475,7 @@ var
 begin
   DecodeDate(Value, Year, Month, Day);
   DecodeTime(Value, Hour, Minute, Second, MilliSeconds);
-  Result := Format('%.4d-%.2d-%.2dT%.2d:%.2d:%.2d.%d', [Year, Month, Day, Hour, Minute, Second, Milliseconds]);
+  Result := Format('%.4d-%.2d-%.2dT%.2d:%.2d:%.2d.%.3d', [Year, Month, Day, Hour, Minute, Second, Milliseconds]);
   Offset := Value - TTimeZone.Local.ToUniversalTime(Value);
   DecodeTime(Offset, Hour, Minute, Second, MilliSeconds);
   if Offset < 0 then
@@ -2906,7 +2906,7 @@ var
 begin
   DecodeDate(UtcDateTime, Year, Month, Day);
   DecodeTime(UtcDateTime, Hour, Minute, Second, MilliSeconds);
-  Result := Format('%.4d-%.2d-%.2dT%.2d:%.2d:%.2d.%dZ',
+  Result := Format('%.4d-%.2d-%.2dT%.2d:%.2d:%.2d.%.3dZ',
     [Year, Month, Day, Hour, Minute, Second, Milliseconds]);
 end;
 
@@ -2928,7 +2928,7 @@ begin
     DateTimeToSystemTime(Value, LocalTime);
     if not TzSpecificLocalTimeToSystemTime(nil, LocalTime, UtcTime) then
       UtcTime := LocalTime;
-    Result := Format('%.4d-%.2d-%.2dT%.2d:%.2d:%.2d.%dZ',
+    Result := Format('%.4d-%.2d-%.2dT%.2d:%.2d:%.2d.%.3dZ',
       [UtcTime.wYear, UtcTime.wMonth, UtcTime.wDay,
        UtcTime.wHour, UtcTime.wMinute, UtcTime.wSecond, UtcTime.wMilliseconds]);
   end

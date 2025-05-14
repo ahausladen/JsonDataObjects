@@ -1681,7 +1681,7 @@ begin
     O.DUtc['UtcDateTime'] := dt;
     S := O.ToJSON;
 
-    CheckEquals('{"DateTime":"' + TJsonBaseObject.DateTimeToJSON(dt, True) + '","UtcDateTime":"2018-08-13T00:00:00.0Z"}', S, 'DateTime/UtcDateTime as string');
+    CheckEquals('{"DateTime":"' + TJsonBaseObject.DateTimeToJSON(dt, True) + '","UtcDateTime":"2018-08-13T00:00:00.000Z"}', S, 'DateTime/UtcDateTime as string');
   finally
     O.Free;
   end;
