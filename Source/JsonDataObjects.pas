@@ -878,6 +878,24 @@ var
     NullConvertsToValueTypes: False;  // If True and an object is nil/null, a convertion to String, Int, Long, Float, DateTime, Boolean will return ''/0/False
   );
 
+/// <summary>
+/// Result True if the string is a valid json object or json array
+/// starting with "{" or "[" and with valid json content
+/// </summary>
+function IsValidJSON(const JSONString: string): Boolean;
+
+/// <summary>
+/// Result True if the string is a valid json object
+/// starting with "{" and with valid json content
+/// </summary>
+function IsValidJSONObject(const JSONString: string): Boolean;
+
+/// <summary>
+/// Result True if the string is a valid json array
+/// starting with "[" and with valid json content
+/// </summary>
+function IsValidJSONArray(const JSONString: string): Boolean;
+
 implementation
 
 uses
@@ -8425,6 +8443,54 @@ begin
     end;
   end;
   Result := Pointer(FBytes);
+end;
+
+function IsValidJSON(const JSONString: string): Boolean;
+var
+  JSONObject: TJsonBaseObject;
+begin
+  Result := False;
+  try
+    JSONObject := TJsonBaseObject.Parse(JSONString);
+    if Assigned(JSONObject) then Result := True;
+    JSONObject.Free;
+  except
+    on E: Exception do
+      // Invalid JSON will raise an exception
+      Result := False;
+  end;
+end;
+
+function IsValidJSONArray(const JSONString: string): Boolean;
+var
+  JSONObject: TJsonArray;
+begin
+  Result := False;
+  try
+    JSONObject := TJsonObject.Parse(JSONString) as TJsonArray;
+    if Assigned(JSONObject) then Result := True;
+    JSONObject.Free;
+  except
+    on E: Exception do
+      // Invalid JSON will raise an exception
+      Result := False;
+  end;
+end;
+
+function IsValidJSONObject(const JSONString: string): Boolean;
+var
+  JSONObject: TJsonObject;
+begin
+  Result := False;
+  try
+    JSONObject := TJsonObject.Parse(JSONString) as TJsonObject;
+    if Assigned(JSONObject) then Result := True;
+    JSONObject.Free;
+  except
+    on E: Exception do
+      // Invalid JSON will raise an exception
+      Result := False;
+  end;
 end;
 
 initialization
