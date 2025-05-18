@@ -753,6 +753,7 @@ type
     FCapacity: Integer;
     FCount: Integer;
     FSortedNames: PJsonStringSortIndexArray;
+    FFirstUnsortedNameIndex: Integer;
     {$IFDEF USE_LAST_NAME_STRING_LITERAL_CACHE}
     FLastValueItem: PJsonDataValue;
     FLastValueItemNamePtr: Pointer;
@@ -805,9 +806,11 @@ type
     function InternAddArray(var AName: string): TJsonArray;
     function InternAddObject(var AName: string): TJsonObject;
 
+    procedure SortUnsortedNames;
+    function CompareSortedName(SortIndex1, SortIndex2: Integer): Integer;
+    procedure QuickSortNames(L, R: Integer);
     function InternIndexOfSortedName(const Name: string): Integer;
     function InternFindSortedNameInsertIndex(NameIndex: Integer): Integer;
-    procedure InternAddSortedName(NameIndex: Integer);
     procedure InternDeleteSortedName(SortIndex: Integer);
     function InternAddItem(var Name: string): PJsonDataValue;
     function AddItem(const Name: string): PJsonDataValue;
@@ -4633,6 +4636,7 @@ begin
     FItems[I].Clear;
   end;
   FCount := 0;
+  FFirstUnsortedNameIndex := -1;
 end;
 
 procedure TJsonObject.Remove(const Name: string);
@@ -4689,6 +4693,97 @@ begin
     Result := True;
 end;
 
+procedure TJsonObject.SortUnsortedNames;
+var
+  I: Integer;
+  SortIndex: Integer;
+begin
+  if FFirstUnsortedNameIndex <> -1 then
+  begin
+    if FCount <> 0 then
+    begin
+      if FCount - FFirstUnsortedNameIndex = 1 then
+      begin
+        SortIndex := InternFindSortedNameInsertIndex(FFirstUnsortedNameIndex);
+        if SortIndex < FFirstUnsortedNameIndex then // FCount is still the old count before the addition
+          Move(FSortedNames[SortIndex], FSortedNames[SortIndex + 1], (FFirstUnsortedNameIndex - SortIndex) * SizeOf(FSortedNames[0]));
+        FSortedNames[SortIndex] := FFirstUnsortedNameIndex;
+      end
+      else
+      begin
+        for I := 0 to FCount - 1 do
+          FSortedNames[I] := I;
+        QuickSortNames(0, FCount - 1);
+      end;
+    end;
+    FFirstUnsortedNameIndex := -1; // reset so that we don't recurve in InternAddSortedName
+  end;
+end;
+
+function TJsonObject.CompareSortedName(SortIndex1, SortIndex2: Integer): Integer;
+var
+  P1, P2: PString;
+begin
+  P1 := @FNames[FSortedNames[SortIndex1]];
+  P2 := @FNames[FSortedNames[SortIndex2]];
+
+  Result := Length(P1^) - Length(P2^);
+  if Result = 0 then
+    Result := CompareStr(P1^, P2^);
+end;
+
+procedure TJsonObject.QuickSortNames(L, R: Integer);
+var
+  I, J, P, X: Integer;
+begin
+  repeat
+    I := L;
+    J := R;
+    P := (L + R) shr 1;
+    repeat
+      while CompareSortedName(I, P) < 0 do
+        Inc(I);
+      while CompareSortedName(J, P) > 0 do
+        Dec(J);
+      if I <= J then
+      begin
+        if I <> J then
+        begin
+          X := FSortedNames[J];
+          FSortedNames[J] := FSortedNames[I];
+          FSortedNames[I] := X
+        end;
+        if P = I then
+          P := J
+        else if P = J then
+          P := I;
+        Inc(I);
+        Dec(J);
+      end;
+    until I > J;
+
+
+    if L < J then
+    begin
+      // Use the recursion only for the smaller part to reduce the recursion depth in
+      // the worst-case scenario.
+      if (J - L) <= (R - I) then
+      begin
+        QuickSortNames(L, J);
+        L := I;
+      end
+      else
+      begin
+        QuickSortNames(I, R);
+        R := J;
+        I := L;
+      end;
+    end
+    else
+      L := I;
+  until I >= R;
+end;
+
 function TJsonObject.InternIndexOfSortedName(const Name: string): Integer;
 var
   H, I, C: Integer;
@@ -4724,7 +4819,11 @@ var
 begin
   NameLen := Length(FNames[NameIndex]);
   Result := 0;
-  H := FCount - 1;
+  if FFirstUnsortedNameIndex <> -1 then
+    H := FFirstUnsortedNameIndex - 1
+  else
+    H := FCount - 1;
+
   while Result <= H do
   begin
     I := (Result + H) shr 1;
@@ -4743,16 +4842,6 @@ begin
       end;
     end;
   end;
-end;
-
-procedure TJsonObject.InternAddSortedName(NameIndex: Integer);
-var
-  SortIndex: Integer;
-begin
-  SortIndex := InternFindSortedNameInsertIndex(NameIndex);
-  if SortIndex < FCount then // FCount is still the old count before the addition
-    Move(FSortedNames[SortIndex], FSortedNames[SortIndex + 1], (FCount - SortIndex) * SizeOf(FSortedNames[0]));
-  FSortedNames[SortIndex] := NameIndex;
 end;
 
 procedure TJsonObject.InternDeleteSortedName(SortIndex: Integer);
@@ -4775,7 +4864,8 @@ begin
   {$ELSE}
   P^ := Name;
   {$ENDIF USE_NAME_STRING_LITERAL}
-  InternAddSortedName(FCount);
+  if FFirstUnsortedNameIndex = -1 then
+    FFirstUnsortedNameIndex := FCount;
   Inc(FCount);
 
   Result.FValue.P := nil;
@@ -4793,7 +4883,8 @@ begin
   // Transfer the string without going through UStrAsg and UStrClr
   Pointer(P^) := Pointer(Name);
   Pointer(Name) := nil;
-  InternAddSortedName(FCount);
+  if FFirstUnsortedNameIndex = -1 then
+    FFirstUnsortedNameIndex := FCount;
   Inc(FCount);
 
   Result.FValue.P := nil;
@@ -5018,6 +5109,9 @@ end;
 
 function TJsonObject.IndexOf(const Name: string): Integer;
 begin
+  if FFirstUnsortedNameIndex <> -1 then
+    SortUnsortedNames;
+
   Result := InternIndexOfSortedName(Name);
   if Result <> -1 then
     Result := FSortedNames[Result];
@@ -5096,7 +5190,7 @@ end;
 
 procedure TJsonObject.Delete(Index: Integer);
 var
-  SortIndex, NameIndex: Integer;
+  SortIndex, NameIndex, SortCount: Integer;
 begin
   if (Index < 0) or (Index >= FCount) then
     ListError(@SListIndexError, Index);
@@ -5109,7 +5203,10 @@ begin
   end;
   {$ENDIF USE_LAST_NAME_STRING_LITERAL_CACHE}
   // Adjust all NameIndex values after the found name and remove the element
-  for SortIndex := FCount - 1 downto 0 do
+  SortCount := FFirstUnsortedNameIndex;
+  if SortCount = -1 then
+    SortCount := FCount;
+  for SortIndex := SortCount - 1 downto 0 do
   begin
     NameIndex := FSortedNames[SortIndex];
     if NameIndex = Index then
@@ -5117,6 +5214,9 @@ begin
     else if NameIndex > Index then
       Dec(FSortedNames[SortIndex]);
   end;
+  if (FFirstUnsortedNameIndex <> -1) and (FFirstUnsortedNameIndex < Index) then
+    Dec(FFirstUnsortedNameIndex);
+
   FNames[Index] := '';
   FItems[Index].Clear;
   Dec(FCount);
@@ -5481,6 +5581,7 @@ begin
       FNames[I] := ASource.FNames[I];
       {$ENDIF USE_NAME_STRING_LITERAL}
       FSortedNames[I] := ASource.FSortedNames[I];
+      FFirstUnsortedNameIndex := ASource.FFirstUnsortedNameIndex;
       InternInitAndAssignItem(@FItems[I], @ASource.FItems[I]);
     end;
   end
