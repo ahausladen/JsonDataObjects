@@ -4692,13 +4692,17 @@ end;
 function TJsonObject.InternIndexOfSortedName(const Name: string): Integer;
 var
   H, I, C: Integer;
+  NameLen: Integer;
 begin
+  NameLen := Length(Name);
   Result := 0;
   H := FCount - 1;
   while Result <= H do
   begin
     I := (Result + H) shr 1;
-    C := CompareStr(FNames[FSortedNames[I]], Name);
+    C := Length(FNames[FSortedNames[I]]) - NameLen;
+    if C = 0 then
+      C := CompareStr(FNames[FSortedNames[I]], Name);
     if C < 0 then
       Result := I + 1
     else
@@ -4716,14 +4720,17 @@ end;
 
 function TJsonObject.InternFindSortedNameInsertIndex(NameIndex: Integer): Integer;
 var
-  H, I, C: Integer;
+  H, I, C, NameLen: Integer;
 begin
+  NameLen := Length(FNames[NameIndex]);
   Result := 0;
   H := FCount - 1;
   while Result <= H do
   begin
     I := (Result + H) shr 1;
-    C := CompareStr(FNames[FSortedNames[I]], FNames[NameIndex]);
+    C := Length(FNames[FSortedNames[I]]) - NameLen;
+    if C = 0 then
+      C := CompareStr(FNames[FSortedNames[I]], FNames[NameIndex]);
     if C < 0 then
       Result := I + 1
     else
