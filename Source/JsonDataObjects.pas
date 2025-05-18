@@ -87,6 +87,9 @@ unit JsonDataObjects;
 // and seals the TJsonArray and TJsonObject classes because it isn't safe to derive from them.
 {$DEFINE USE_FAST_NEWINSTANCE}
 
+// Use a sorted string list to find the names instead of a linear search.
+{$DEFINE USE_SORTED_NAMES}
+
 //{$IF CompilerVersion < 28.0} // XE6 or older
   // The XE7 compiler is broken. It doesn't collapse duplicate string literals anymore. (RSP-10015)
   // But if the string literals are used in loops this optimization still helps.
@@ -747,6 +750,9 @@ type
     FNames: PJsonStringArray;
     FCapacity: Integer;
     FCount: Integer;
+    {$IFDEF USE_SORTED_NAMES}
+    FSortedNames: TStringList;
+    {$ENDIF USE_SORTED_NAMES}
     {$IFDEF USE_LAST_NAME_STRING_LITERAL_CACHE}
     FLastValueItem: PJsonDataValue;
     FLastValueItemNamePtr: Pointer;
@@ -4530,6 +4536,9 @@ begin
   Clear;
   FreeMem(FItems);
   FreeMem(FNames);
+  {$IFDEF USE_SORTED_NAMES}
+  FSortedNames.Free;
+  {$ENDIF USE_SORTED_NAMES}
   //inherited Destroy;
 end;
 
@@ -4568,6 +4577,16 @@ begin
   {$ENDIF USE_LAST_NAME_STRING_LITERAL_CACHE}
   ReallocMem(Pointer(FItems), FCapacity * SizeOf(FItems[0]));
   ReallocMem(Pointer(FNames), FCapacity * SizeOf(FNames[0]));
+
+  {$IFDEF USE_SORTED_NAMES}
+  if FSortedNames = nil then
+  begin
+    FSortedNames := TStringList.Create;
+    FSortedNames.Sorted := True;
+    FSortedNames.CaseSensitive := True;
+    FSortedNames.Capacity := FCapacity;
+  end;
+  {$ENDIF USE_SORTED_NAMES}
 end;
 
 procedure TJsonObject.SetCapacity(const Value: Integer);
@@ -4585,6 +4604,10 @@ begin
         FItems[I].Clear;
       end;
       FCount := FCapacity;
+      {$IFDEF USE_SORTED_NAMES}
+      if FSortedNames <> nil then
+        FSortedNames.Capacity := FCapacity;
+      {$ENDIF USE_SORTED_NAMES}
     end;
     FCapacity := Value;
     InternApplyCapacity;
@@ -4603,6 +4626,10 @@ begin
     FNames[I] := '';
     FItems[I].Clear;
   end;
+  {$IFDEF USE_SORTED_NAMES}
+  if FSortedNames <> nil then
+    FSortedNames.Clear;
+  {$ENDIF USE_SORTED_NAMES}
   FCount := 0;
 end;
 
@@ -4676,6 +4703,10 @@ begin
   P^ := Name;
   {$ENDIF USE_NAME_STRING_LITERAL}
 
+  {$IFDEF USE_SORTED_NAMES}
+  FSortedNames.AddObject(P^, Pointer(FCount - 1));
+  {$ENDIF USE_SORTED_NAMES}
+
   Result.FValue.P := nil;
   Result.FTyp := jdtNone;
 end;
@@ -4692,6 +4723,10 @@ begin
   // Transfer the string without going through UStrAsg and UStrClr
   Pointer(P^) := Pointer(Name);
   Pointer(Name) := nil;
+
+  {$IFDEF USE_SORTED_NAMES}
+  FSortedNames.AddObject(P^, Pointer(FCount - 1));
+  {$ENDIF USE_SORTED_NAMES}
 
   Result.FValue.P := nil;
   Result.FTyp := jdtNone;
@@ -4902,8 +4937,21 @@ end;
 
 function TJsonObject.IndexOfPChar(S: PChar; Len: Integer): Integer;
 var
+  {$IFDEF USE_SORTED_NAMES}
+  Value: string;
+  {$ELSE}
   P: PJsonStringArray;
+  {$ENDIF USE_SORTED_NAMES}
 begin
+  {$IFDEF USE_SORTED_NAMES}
+  if Len = 0 then
+    Result := IndexOf('')
+  else
+  begin
+    System.SetString(Value, S, Len);
+    Result := IndexOf(Value);
+  end;
+  {$ELSE}
   P := FNames;
   if Len = 0 then
   begin
@@ -4918,17 +4966,27 @@ begin
         Exit;
   end;
   Result := -1;
+  {$ENDIF USE_SORTED_NAMES}
 end;
 
 function TJsonObject.IndexOf(const Name: string): Integer;
+{$IFNDEF USE_SORTED_NAMES}
 var
   P: PJsonStringArray;
+{$ENDIF ~USE_SORTED_NAMES}
 begin
+  {$IFDEF USE_SORTED_NAMES}
+  if (FSortedNames <> nil) and FSortedNames.Find(Name, Result) then
+    Result := Integer(FSortedNames.Objects[Result])
+  else
+    Result := -1;
+  {$ELSE}
   P := FNames;
   for Result := 0 to FCount - 1 do
     if {(Pointer(Name) = Pointer(P[Result])) or} (Name = P[Result]) then
       Exit;
   Result := -1;
+  {$ENDIF USE_SORTED_NAMES}
 end;
 
 function TJsonObject.FindItem(const Name: string; var Item: PJsonDataValue): Boolean;
@@ -5003,6 +5061,10 @@ begin
 end;
 
 procedure TJsonObject.Delete(Index: Integer);
+{$IFDEF USE_SORTED_NAMES}
+var
+  I, Idx: Integer;
+{$ENDIF USE_SORTED_NAMES}
 begin
   if (Index < 0) or (Index >= FCount) then
     ListError(@SListIndexError, Index);
@@ -5014,6 +5076,20 @@ begin
     //FLastValueItemNamePtr := nil;
   end;
   {$ENDIF USE_LAST_NAME_STRING_LITERAL_CACHE}
+  {$IFDEF USE_SORTED_NAMES}
+  if FSortedNames <> nil then
+  begin
+    // adjust all index positions after the found element and remove the "Index"-ed element
+    for I := 0 to FSortedNames.Count - 1 do
+    begin
+      Idx := Integer(FSortedNames.Objects[I]);
+      if Idx = Index then
+        FSortedNames.Delete(I)
+      else if Idx > Index then
+        FSortedNames.Objects[I] := Pointer(Idx - 1);
+    end;
+  end;
+  {$ENDIF USE_SORTED_NAMES}
   FNames[Index] := '';
   FItems[Index].Clear;
   Dec(FCount);
@@ -5340,15 +5416,23 @@ function TJsonObject.FindCaseInsensitiveItem(const ACaseInsensitiveName: string)
 var
   I: Integer;
 begin
-  for I := 0 to Count - 1 do
+  {$IFDEF USE_SORTED_NAMES}
+  // Try with the faster case sensitive search
+  if (FSortedNames <> nil) and FSortedNames.Find(ACaseInsensitiveName, I) then
+    Result := @FItems[I]
+  else
+  {$ENDIF USE_SORTED_NAMES}
   begin
-    if AnsiSameText(FNames[I], ACaseInsensitiveName) then
+    for I := 0 to Count - 1 do
     begin
-      Result := @FItems[I];
-      Exit;
+      if AnsiSameText(FNames[I], ACaseInsensitiveName) then
+      begin
+        Result := @FItems[I];
+        Exit;
+      end;
     end;
+    Result := nil;
   end;
-  Result := nil;
 end;
 
 procedure TJsonObject.Assign(ASource: TJsonObject);
@@ -5372,11 +5456,20 @@ begin
       {$ENDIF USE_NAME_STRING_LITERAL}
       InternInitAndAssignItem(@FItems[I], @ASource.FItems[I]);
     end;
+    {$IFDEF USE_SORTED_NAMES}
+    FSortedNames.Clear;
+    if ASource.FSortedNames <> nil then
+      FSortedNames.Assign(ASource.FSortedNames);
+    {$ENDIF USE_SORTED_NAMES}
   end
   else
   begin
     FreeMem(FItems);
     FreeMem(FNames);
+    {$IFDEF USE_SORTED_NAMES}
+    if FSortedNames <> nil then
+      FSortedNames.Clear;
+    {$ENDIF USE_SORTED_NAMES}
     FCapacity := 0;
   end;
 end;
