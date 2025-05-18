@@ -73,6 +73,9 @@ unit JsonDataObjects;
 // Sanity checks all array index accesses and raise an EListError exception.
 {$DEFINE CHECK_ARRAY_INDEX}
 
+// If defined the JSON parser is more strict to what is allowed and what not.
+{$DEFINE STRICT_JSON_PARSER}
+
 // JSON allows the slash to be escaped. This is only necessary if you plan to put the JSON string
 // into a <script>-Tag because then "</" can't be used and must be escaped to "<\/". This switch
 // enables the special handling for "</" but makes the parser slightly slower.
@@ -1775,6 +1778,9 @@ begin
             Inc(P, 3);
           end;
       else
+        {$IFDEF STRICT_JSON_PARSER}
+        InvalidStringCharacterError(Reader);
+        {$ENDIF STRICT_JSON_PARSER}
         Break;
       end;
       Inc(P);
@@ -1852,6 +1858,9 @@ begin
             Inc(P, 3);
           end;
       else
+        {$IFDEF STRICT_JSON_PARSER}
+        InvalidStringCharacterError(Reader);
+        {$ENDIF STRICT_JSON_PARSER}
         Break;
       end;
       Inc(P);
@@ -1902,6 +1911,9 @@ begin
     ParseArrayBody(TJsonArray(Data));
     Accept(jtkRBracket)
   end;
+  {$IFDEF STRICT_JSON_PARSER}
+  Accept(jtkEof);
+  {$ENDIF STRICT_JSON_PARSER}
 end;
 
 procedure TJsonReader.ParseObjectBody(const Data: TJsonObject);
@@ -1922,7 +1934,11 @@ end;
 procedure TJsonReader.ParseObjectProperty(const Data: TJsonObject);
 // Property ::= IDENT ":" ObjectPropertyValue
 begin
+  {$IFDEF STRICT_JSON_PARSER}
+  if FLook.Kind = jtkString then
+  {$ELSE}
   if FLook.Kind >= jtkIdent then // correct JSON would be "tkString" only
+  {$ENDIF STRICT_JSON_PARSER}
   begin
     {$IFDEF USE_STRINGINTERN_FOR_NAMES}
     FIdents.Intern(FLook.S, FPropName);
@@ -1965,7 +1981,9 @@ begin
         Next;
       end;
 
+    {$IFNDEF STRICT_JSON_PARSER}
     jtkIdent,
+    {$ENDIF ~STRICT_JSON_PARSER}
     jtkString:
       begin
         Data.InternAddItem(FPropName).InternSetValueTransfer(FLook.S);
@@ -2051,7 +2069,9 @@ begin
         Next;
       end;
 
+    {$IFNDEF STRICT_JSON_PARSER}
     jtkIdent,
+    {$ENDIF ~STRICT_JSON_PARSER}
     jtkString:
       begin
         Data.Add(FLook.S);

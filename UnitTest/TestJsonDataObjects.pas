@@ -387,7 +387,7 @@ begin
     B.Free;
   end;
 
-  B := TJsonBaseObject.ParseUtf8('[ "Item1", "Item2"] ]');
+  B := TJsonBaseObject.ParseUtf8('[ "Item1", "Item2" ]');
   try
     CheckNotNull(B, 'B <> nil');
     CheckIs(B, TJsonArray);
@@ -404,7 +404,7 @@ begin
     B.Free;
   end;
 
-  B := TJsonBaseObject.ParseUtf8('[ "Item1", "Item2", {} ] ]');
+  B := TJsonBaseObject.ParseUtf8('[ "Item1", "Item2", {} ]');
   try
     CheckNotNull(B, 'B <> nil');
     CheckIs(B, TJsonArray);
@@ -444,7 +444,7 @@ begin
     B.Free;
   end;
 
-  B := TJsonBaseObject.ParseUtf8('[ "\t", "\r\n", "X\r\n", "\r\nX", "Xx\r\n\xX" ]');
+  B := TJsonBaseObject.ParseUtf8('[ "\t", "\r\n", "X\r\n", "\r\nX", "Xx\r\nxX" ]');
   try
     CheckIs(B, TJsonArray);
     A := B as TJsonArray;
@@ -661,7 +661,7 @@ begin
     B.Free;
   end;
 
-  B := TJsonBaseObject.Parse('[ "Item1", "Item2"] ]');
+  B := TJsonBaseObject.Parse('[ "Item1", "Item2" ]');
   try
     CheckNotNull(B, 'B <> nil');
     CheckIs(B, TJsonArray);
@@ -678,7 +678,7 @@ begin
     B.Free;
   end;
 
-  B := TJsonBaseObject.Parse('[ "Item1", "Item2", {} ] ]');
+  B := TJsonBaseObject.Parse('[ "Item1", "Item2", {} ]');
   try
     CheckNotNull(B, 'B <> nil');
     CheckIs(B, TJsonArray);
@@ -717,6 +717,20 @@ begin
     CheckEquals(6, A.A[1].I[2]);
 
     CheckEqualsString('[[1,2,3],[4,5,6]]', A.ToJSON);
+  finally
+    B.Free;
+  end;
+
+  B := TJsonBaseObject.Parse('[ "\t", "\r\n", "X\r\n", "\r\nX", "Xx\r\nxX" ]');
+  try
+    CheckIs(B, TJsonArray);
+    A := B as TJsonArray;
+    CheckEquals(5, A.Count);
+    CheckEqualsString(#9, A.S[0]);
+    CheckEqualsString(#13#10, A.S[1]);
+    CheckEqualsString('X'#13#10, A.S[2]);
+    CheckEqualsString(#13#10'X', A.S[3]);
+    CheckEqualsString('Xx'#13#10'xX', A.S[4]);
   finally
     B.Free;
   end;
@@ -2599,7 +2613,7 @@ begin
     Json.Path['ferrmsg'] := 'Test';
     CheckEquals('{"ferrcod":2,"ferrmsg":"Test"}', Json.ToJSON(True));
 
-    Json.FromJSON(' { "First" : [ { "Second": { "Third": { Value: "Hello World!" } } }, { "Fourth": "Nothing to see" }, "String" ] }');
+    Json.FromJSON(' { "First" : [ { "Second": { "Third": { "Value": "Hello World!" } } }, { "Fourth": "Nothing to see" }, "String" ] }');
     CheckEqualsString('Hello World!', Json.Path['First'].Items[0].Path['Second.Third.Value']);
     CheckEqualsString('Nothing to see', Json.Path['First[1].Fourth']);
     Check(Json.Path['First'].Typ = jdtArray);
