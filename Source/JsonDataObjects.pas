@@ -5846,40 +5846,51 @@ begin
 end;
 
 class function TStringIntern.GetHash(const Name: string): Integer;
+// FNV-1a hash
+label
+  Pad2, Pad1;
+const
+  FNV_PRIME = $01000193;
+  FNV_SEED  = $811C9DC5;
 var
-  P: PChar;
-  Ch: Word;
+  Len: NativeInt;
+  P: PWideChar;
 begin
-  // Only used to reduce memory when parsing large JSON strings
   Result := 0;
-  P := PChar(Pointer(Name));
+  P := PWideChar(Pointer(Name));
   if P <> nil then
   begin
-    Result := PInteger(@PByte(Name)[-4])^;
-    while True do
+    Len := PInteger(@PByte(Name)[-4])^; // Len := Length(Name);
+    P := @P[Len];
+    Len := -Len + 4;
+    Result := Integer(FNV_SEED);
+    while Len <= 0 do
     begin
-      Ch := Word(P[0]);
-      if Ch = 0 then
-        Break;
-      Result := Result + Ch;
+      Result := (Result xor Word(P[Len])) * FNV_PRIME;
+      Result := (Result xor Word(P[Len + 1])) * FNV_PRIME;
+      Result := (Result xor Word(P[Len + 2])) * FNV_PRIME;
+      Result := (Result xor Word(P[Len + 3])) * FNV_PRIME;
+      Inc(Len, 4);
+    end;
 
-      Ch := Word(P[1]);
-      if Ch = 0 then
-        Break;
-      Result := Result + Ch;
-
-      Ch := Word(P[2]);
-      if Ch = 0 then
-        Break;
-      Result := Result + Ch;
-
-      Ch := Word(P[3]);
-      if Ch = 0 then
-        Break;
-      Result := Result + Ch;
-
-      Result := (Result shl 6) or ((Result shr 26) and $3F);
-      Inc(P, 4);
+    // Process the up to 3 remaining chars
+    case Len of
+      1:
+        begin
+          Result := (Result xor Word(P[-3])) * FNV_PRIME;
+          goto Pad2;
+        end;
+      2:
+        begin
+Pad2:
+          Result := (Result xor Word(P[-2])) * FNV_PRIME;
+          goto Pad1;
+        end;
+      3:
+        begin
+Pad1:
+          Result := (Result xor Word(P[-1])) * FNV_PRIME;
+        end;
     end;
   end;
 end;
@@ -5900,6 +5911,7 @@ begin
     Next := Bucket^;
     Hash := AHash;
     Pointer(Name) := Pointer(S);
+    // We are parsing JSON, no other thread knowns about the string => skip the CPU lock
     Inc(PInteger(@PByte(Name)[-8])^);
   end;
   Bucket^ := Index;
