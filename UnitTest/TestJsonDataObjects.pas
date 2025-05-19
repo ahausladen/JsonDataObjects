@@ -75,6 +75,7 @@ type
     procedure TestSyntaxErrors;
     procedure TestDateTimeToJsonString;
     procedure TestSmallFloatValues;
+    procedure TestPrimitiveValue;
   end;
 
   TestTJsonArray = class(TTestCase)
@@ -1834,6 +1835,56 @@ begin
   finally
     Json.Free;
   end;
+end;
+
+procedure TestTJsonBaseObject.TestPrimitiveValue;
+var
+  V: TJsonPrimitiveValue;
+begin
+  V := TJsonBaseObject.Parse('"Test"') as TJsonPrimitiveValue;
+  try
+    CheckEquals('Test', V.Item.Value);
+    CheckEquals('"Test"', V.ToJSON());
+  finally
+    V.Free;
+  end;
+
+  V := TJsonBaseObject.Parse('false') as TJsonPrimitiveValue;
+  try
+    CheckFalse(V.Item.IsNull);
+    CheckEquals(False, V.Item.BoolValue);
+    CheckEquals('false', V.ToJSON());
+  finally
+    V.Free;
+  end;
+
+  V := TJsonBaseObject.Parse('true') as TJsonPrimitiveValue;
+  try
+    CheckFalse(V.Item.IsNull);
+    CheckEquals(True, V.Item.BoolValue);
+    CheckEquals('true', V.ToJSON());
+  finally
+    V.Free;
+  end;
+
+  V := TJsonBaseObject.Parse('null') as TJsonPrimitiveValue;
+  try
+    CheckTrue(V.Item.IsNull);
+    CheckEquals('null', V.ToJSON());
+  finally
+    V.Free;
+  end;
+
+  V := TJsonBaseObject.Parse('123') as TJsonPrimitiveValue;
+  try
+    CheckFalse(V.Item.IsNull);
+    CheckEquals(123, V.Item.IntValue);
+    CheckEquals('123', V.ToJSON());
+  finally
+    V.Free;
+  end;
+
+  CheckFalse(IsValidJSON('abc'));
 end;
 
 { TestTJsonArray }

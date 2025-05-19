@@ -377,6 +377,7 @@ type
     procedure TypeCastError(ExpectedType: TJsonDataType);
   public
     function IsNull: Boolean;
+    procedure Assign(AValue: PJsonDataValue);
 
     property Typ: TJsonDataType read FTyp;
     property Value: string read GetValue write SetValue;
@@ -656,6 +657,23 @@ type
     class function JSONToDateTime(const Value: string; ConvertToLocalTime: Boolean = True): TDateTime; static;
     class function DateTimeToJSON(const Value: TDateTime; UseUtcTime: Boolean): string; static;
     class function UtcDateTimeToJSON(const UtcDateTime: TDateTime): string; static;
+  end;
+
+  TJsonPrimitiveValue = class(TJsonBaseObject)
+  private
+    FValue: TJsonDataValue;
+    function GetValue: TJsonDataValueHelper;
+    procedure SetValue(const Value: TJsonDataValueHelper);
+    function GetItem: PJsonDataValue; inline;
+  protected
+    procedure InternToJSON(var Writer: TJsonOutputWriter); override;
+  public
+    destructor Destroy; override;
+    function Clone: TJsonPrimitiveValue;
+    procedure Assign(ASource: TJsonPrimitiveValue);
+
+    property Item: PJsonDataValue read GetItem;
+    property Value: TJsonDataValueHelper read GetValue write SetValue;
   end;
 
   PJsonDataValueArray = ^TJsonDataValueArray;
@@ -2024,6 +2042,8 @@ begin
 end;
 
 procedure TJsonReader.Parse(Data: TJsonBaseObject);
+var
+  A: TJsonArray;
 begin
   if Data is TJsonObject then
   begin
@@ -2040,7 +2060,24 @@ begin
     Accept(jtkLBracket);
     ParseArrayBody(TJsonArray(Data));
     Accept(jtkRBracket)
-  end;
+  end 
+  else if Data is TJsonPrimitiveValue then
+  begin
+    TJsonPrimitiveValue(Data).Item.Clear;
+    Next; // initialize Lexer 
+    if FLook.Kind < jtkString then // block everything that isn't a value
+      Accept(jtkLBracket); // throw "{" expected error. That's what happened before TJsonPrimitiveValue was added
+
+    // Use the array parser to parse the value
+    A := TJsonArray.Create;
+    try
+      ParseArrayPropertyValue(A);
+      if (A.Count > 0) and not A.Items[0].IsNull then
+        TJsonPrimitiveValue(Data).Item.Assign(A.Items[0]);
+    finally
+      A.Free;
+    end;
+  end;      
   {$IFDEF STRICT_JSON_PARSER}
   Accept(jtkEof);
   {$ENDIF STRICT_JSON_PARSER}
@@ -3230,8 +3267,12 @@ function TJsonBaseObject.Clone: TJsonBaseObject;
 begin
   if Self is TJsonArray then
     Result := TJsonArray(Self).Clone
+  else if Self is TJsonObject then
+    Result := TJsonObject(Self).Clone
+  else if Self is TJsonPrimitiveValue then
+    Result := TJsonPrimitiveValue(Self).Clone
   else
-    Result := TJsonObject(Self).Clone;
+    Result := (Self as TJsonObject).Clone; // raise Cast-Exception
 end;
 
 class function TJsonBaseObject.DateTimeToJSON(const Value: TDateTime; UseUtcTime: Boolean): string;
@@ -3599,8 +3640,10 @@ begin
     begin
       if (L > 0) and (P^ = '[') then
         Result := TJsonArray.Create
-      else
-        Result := TJsonObject.Create;
+      else if P^ = '{' then
+        Result := TJsonObject.Create
+      else         
+        Result := TJsonPrimitiveValue.Create;
 
       {$IFDEF AUTOREFCOUNT}
       Result.FromJSON(S, Len, AProgress);
@@ -4105,6 +4148,64 @@ begin
   raise EJsonCastException.CreateResFmt(@RsTypeCastError,
     [TJsonBaseObject.DataTypeNames[FTyp], TJsonBaseObject.DataTypeNames[ExpectedType]])
     {$IFDEF HAS_RETURN_ADDRESS} at ReturnAddress{$ENDIF};
+end;
+
+procedure TJsonDataValue.Assign(AValue: PJsonDataValue);
+begin
+  if AValue <> @Self then
+  begin
+    Clear;
+    if AValue <> nil then
+      TJsonBaseObject.InternInitAndAssignItem(@Self, AValue);
+  end;
+end;
+
+{ TJsonPrimitiveValue }
+
+destructor TJsonPrimitiveValue.Destroy;
+begin
+  FValue.Clear;
+  inherited Destroy;
+end;
+
+function TJsonPrimitiveValue.GetValue: TJsonDataValueHelper;
+begin
+  Result.FData.FIntern := @FValue;
+  Result.FData.FTyp := jdtNone;
+end;
+
+procedure TJsonPrimitiveValue.SetValue(const Value: TJsonDataValueHelper);
+begin
+  TJsonDataValueHelper.SetInternValue(@FValue, Value);
+end;
+
+procedure TJsonPrimitiveValue.InternToJSON(var Writer: TJsonOutputWriter);
+begin
+  FValue.InternToJSON(Writer);
+end;
+
+function TJsonPrimitiveValue.GetItem: PJsonDataValue;
+begin
+  Result := @FValue;
+end;
+
+function TJsonPrimitiveValue.Clone: TJsonPrimitiveValue;
+begin
+  Result := TJsonPrimitiveValue.Create;
+  try
+    Result.Assign(Self);
+  except
+    Result.Free;
+    raise;
+  end;
+end;
+
+procedure TJsonPrimitiveValue.Assign(ASource: TJsonPrimitiveValue);
+begin
+  if ASource <> nil then
+    FValue.Assign(@ASource.FValue)
+  else
+    FValue.Clear;
 end;
 
 { TJsonArrayEnumerator }
@@ -4855,7 +4956,7 @@ function TJsonArray.Clone: TJsonArray;
 begin
   Result := TJsonArray.Create;
   try
-    TJsonArray(Result).Assign(Self);
+    Result.Assign(Self);
   except
     Result.Free;
     raise;
@@ -5993,7 +6094,7 @@ function TJsonObject.Clone: TJsonObject;
 begin
   Result := TJsonObject.Create;
   try
-    TJsonObject(Result).Assign(Self);
+    Result.Assign(Self);
   except
     Result.Free;
     raise;
@@ -8558,10 +8659,7 @@ class procedure TJsonDataValueHelper.SetInternValue(Item: PJsonDataValue;
 begin
   Value.ResolveName;
   if Value.FData.FIntern <> nil then
-  begin
-    Item.Clear;
-    TJsonBaseObject.InternInitAndAssignItem(Item, Value.FData.FIntern); // clones arrays and objects
-  end
+    Item.Assign(Value.FData.FIntern) // clones arrays and objects
   else
   begin
     case Value.FData.FTyp of
@@ -9156,51 +9254,55 @@ begin
   Result := Pointer(FBytes);
 end;
 
+
 function IsValidJSON(const JSONString: string): Boolean;
 var
-  JSONObject: TJsonBaseObject;
+  Obj: TJsonBaseObject;
 begin
-  Result := False;
   try
-    JSONObject := TJsonBaseObject.Parse(JSONString);
-    if Assigned(JSONObject) then Result := True;
-    JSONObject.Free;
+    Obj := TJsonObject.Parse(JSONString);
+    try
+      Result := Obj <> nil;
+    finally
+      Obj.Free;
+    end;
   except
-    on E: Exception do
-      // Invalid JSON will raise an exception
-      Result := False;
+    // Invalid JSON will raise an exception
+    Result := False;
   end;
 end;
 
 function IsValidJSONArray(const JSONString: string): Boolean;
 var
-  JSONObject: TJsonArray;
+  Obj: TJsonBaseObject;
 begin
-  Result := False;
   try
-    JSONObject := TJsonObject.Parse(JSONString) as TJsonArray;
-    if Assigned(JSONObject) then Result := True;
-    JSONObject.Free;
+    Obj := TJsonObject.Parse(JSONString);
+    try
+      Result := Obj is TJsonArray;
+    finally
+      Obj.Free;
+    end;
   except
-    on E: Exception do
-      // Invalid JSON will raise an exception
-      Result := False;
+    // Invalid JSON will raise an exception
+    Result := False;
   end;
 end;
 
 function IsValidJSONObject(const JSONString: string): Boolean;
 var
-  JSONObject: TJsonObject;
+  Obj: TJsonBaseObject;
 begin
-  Result := False;
   try
-    JSONObject := TJsonObject.Parse(JSONString) as TJsonObject;
-    if Assigned(JSONObject) then Result := True;
-    JSONObject.Free;
+    Obj := TJsonObject.Parse(JSONString);
+    try
+      Result := Obj is TJsonObject;
+    finally
+      Obj.Free;
+    end;
   except
-    on E: Exception do
-      // Invalid JSON will raise an exception
-      Result := False;
+    // Invalid JSON will raise an exception
+    Result := False;
   end;
 end;
 
