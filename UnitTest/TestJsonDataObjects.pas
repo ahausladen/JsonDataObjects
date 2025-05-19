@@ -64,6 +64,7 @@ type
     procedure TestEmptyString;
     {$IFDEF SUPPORTS_UTF8STRING}
     procedure TestToUTF8JSON;
+    procedure TestUTF8Value;
     {$ENDIF SUPPORTS_UTF8STRING}
     procedure TestInt64MaxIntX2;
     procedure TestVariant;
@@ -88,6 +89,9 @@ type
     procedure TestInsert;
     procedure TestExtract;
     procedure TestEnumerator;
+    {$IFDEF SUPPORTS_UTF8STRING}
+    procedure TestUTF8Value;
+    {$ENDIF SUPPORTS_UTF8STRING}
   end;
 
   TestTJsonObject = class(TTestCase)
@@ -1340,6 +1344,59 @@ begin
     B.Free;
   end;
 end;
+
+procedure TestTJsonBaseObject.TestUTF8Value;
+var
+  Json: TJsonObject;
+  OrgS: string;
+  S: string;
+  U: UTF8String;
+begin
+  OrgS := 'Test123' + Char($00E4) + Char($00F6) + Char($00FC);
+  U := UTF8Encode(OrgS);
+
+  Json := TJsonObject.Create;
+  try
+    Json.UTF8['Value'] := U;
+    Json.S['ValueStr'] := OrgS;
+    CheckTrue(Json.Types['Value'] = jdtString);
+    CheckTrue(Json.Types['ValueStr'] = jdtString);
+
+    {$IF declared(jdtUTF8String)}
+    CheckTrue(Json.TypesEx['Value'] = jdtUTF8String);
+    {$ELSE}
+    CheckTrue(Json.TypesEx['Value'] = jdtString);
+    {$IFEND}
+    CheckTrue(Json.TypesEx['ValueStr'] = jdtString);
+
+    S := Json.ToJSON();
+    CheckEquals('{"Value":"' + OrgS + '","ValueStr":"' + OrgS + '"}', S);
+
+    CheckEquals(U, Json.Values['Value'].ValueUTF8);
+    CheckEquals(OrgS, Json.Values['Value'].Value);
+    CheckEquals(U, Json.Values['ValueStr'].ValueUTF8);
+    CheckEquals(OrgS, Json.Values['ValueStr'].Value);
+  finally
+    Json.Free;
+  end;
+
+  Json := TJsonObject.Create;
+  try
+    Json.UTF8['ValueInt'] := '1234';
+    Json.UTF8['ValueFloat'] := '1.234';
+    Json.UTF8['ValueTrue'] := 'true';
+    Json.UTF8['ValueFalse'] := 'false';
+    Json.UTF8['ValueDate'] := '2025-01-01T11:40:10.000Z';
+
+    CheckEquals(1234, Json.I['ValueInt']);
+    CheckEquals(1.234, Json.F['ValueFloat'], 0.00000001);
+    CheckEquals(True, Json.B['ValueTrue']);
+    CheckEquals(False, Json.B['ValueFalse']);
+    CheckEquals(TJsonBaseObject.JSONToDateTime('2025-01-01T11:40:10.000Z', False), Json.DUtc['ValueDate']);
+  finally
+    Json.Free;
+  end;
+end;
 {$ENDIF SUPPORTS_UTF8STRING}
 
 procedure TestTJsonBaseObject.TestInt64MaxIntX2;
@@ -2045,12 +2102,54 @@ begin
     end;
 
     for Typ in [Low(TJsonDataType)..High(TJsonDataType)] do
-      CheckTrue(FoundTypes[Typ], TJsonBaseObject.DataTypeNames[Typ]);
+    begin
+      {$IF declared(jdtUTF8String)}
+      if Typ <> jdtUTF8String then
+      {$IFEND}
+        CheckTrue(FoundTypes[Typ], TJsonBaseObject.DataTypeNames[Typ]);
+    end;
   finally
     A.Free;
   end;
 end;
 
+{$IFDEF SUPPORTS_UTF8STRING}
+procedure TestTJsonArray.TestUTF8Value;
+var
+  JsonArray: TJsonArray;
+  OrgS: string;
+  S: string;
+  U: UTF8String;
+begin
+  OrgS := 'Test123' + Char($00E4) + Char($00F6) + Char($00FC);
+  U := UTF8Encode(OrgS);
+
+  JsonArray := TJsonArray.Create;
+  try
+    JsonArray.Add(U);
+    JsonArray.Add(OrgS);
+    CheckTrue(JsonArray.Types[0] = jdtString);
+    CheckTrue(JsonArray.Types[1] = jdtString);
+
+    {$IF declared(jdtUTF8String)}
+    CheckTrue(JsonArray.TypesEx[0] = jdtUTF8String);
+    {$ELSE}
+    CheckTrue(JsonArray.TypesEx[0] = jdtString);
+    {$IFEND}
+    CheckTrue(JsonArray.TypesEx[1] = jdtString);
+
+    S := JsonArray.ToJSON();
+    CheckEquals('["' + OrgS + '","' + OrgS + '"]', S);
+
+    CheckEquals(U, JsonArray.Values[0].ValueUTF8);
+    CheckEquals(OrgS, JsonArray.Values[0].Value);
+    CheckEquals(U, JsonArray.Values[1].ValueUTF8);
+    CheckEquals(OrgS, JsonArray.Values[1].Value);
+  finally
+    JsonArray.Free;
+  end;
+end;
+{$ENDIF SUPPORTS_UTF8STRING}
 
 { TestTJsonObject }
 
@@ -2765,7 +2864,12 @@ begin
     end;
 
     for Typ in [Low(TJsonDataType)..High(TJsonDataType)] do
-      CheckTrue(FoundTypes[Typ], TJsonBaseObject.DataTypeNames[Typ]);
+    begin
+      {$IF declared(jdtUTF8String)}
+      if Typ <> jdtUTF8String then
+      {$IFEND}
+        CheckTrue(FoundTypes[Typ], TJsonBaseObject.DataTypeNames[Typ]);
+    end;
   finally
     Obj.Free;
   end;
