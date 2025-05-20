@@ -6362,16 +6362,16 @@ begin
     Result := Integer(FNV_SEED);
     while Len <= 0 do
     begin
-      Result := (Result xor Word(P[Len])) * FNV_PRIME;
-      Result := (Result xor Word(P[Len + 1])) * FNV_PRIME;
-      Result := (Result xor Word(P[Len + 2])) * FNV_PRIME;
-      Result := (Result xor Word(P[Len + 3])) * FNV_PRIME;
+      Result := (Result xor Word(P[Len - 4])) * FNV_PRIME;
+      Result := (Result xor Word(P[Len - 3])) * FNV_PRIME;
+      Result := (Result xor Word(P[Len - 2])) * FNV_PRIME;
+      Result := (Result xor Word(P[Len - 1])) * FNV_PRIME;
       Inc(Len, 4);
     end;
 
     // Process the up to 3 remaining chars
-    case Len of
-      1:
+    case 4 - Len of
+      3:
         begin
           Result := (Result xor Word(P[-3])) * FNV_PRIME;
           goto Pad2;
@@ -6382,7 +6382,7 @@ Pad2:
           Result := (Result xor Word(P[-2])) * FNV_PRIME;
           goto Pad1;
         end;
-      3:
+      1:
         begin
 Pad1:
           Result := (Result xor Word(P[-1])) * FNV_PRIME;
