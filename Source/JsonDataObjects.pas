@@ -22,62 +22,70 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 *****************************************************************************)
 
-{$A8,B-,C+,E-,F-,G+,H+,I+,J-,K-,M-,N-,O+,P+,Q-,R-,S-,T-,U-,V+,W-,X+,Z1}
-{$WARN WIDECHAR_REDUCED OFF} // All sets only use ASCII chars (<=#127) and the compiler generates the >=#128 check itself
-{$STRINGCHECKS OFF} // It only slows down Delphi strings, doesn't help C++Builder migration and is finally gone in XE+
-{$WARN SYMBOL_DEPRECATED OFF} // for StrLen/StrLComp
-{$POINTERMATH ON}
+{$IFDEF FPC}
+  {$mode DelphiUnicode}
+{$ELSE}
+  {$A8,B-,C+,E-,F-,G+,H+,I+,J-,K-,M-,N-,O+,P+,Q-,R-,S-,T-,U-,V+,W-,X+,Z1}
+  {$WARN WIDECHAR_REDUCED OFF} // All sets only use ASCII chars (<=#127) and the compiler generates the >=#128 check itself
+  {$STRINGCHECKS OFF} // It only slows down Delphi strings, doesn't help C++Builder migration and is finally gone in XE+
+  {$WARN SYMBOL_DEPRECATED OFF} // for StrLen/StrLComp
+  {$POINTERMATH ON}
+{$ENDIF FPC}
 
 unit JsonDataObjects;
 
 {--------------------------------------------------------------------------------------------------}
 { Detect Compiler/RTL features                                                                     }
 {--------------------------------------------------------------------------------------------------}
-{$IFDEF VER200}
-  // Delphi 2009's ErrorInsight parser uses the CompilerVersion's memory address instead of 20.0, failing all the
-  // IF CompilerVersion compiler directives
-  {$DEFINE CPUX86}
-{$ELSE}
-  {$IF CompilerVersion >= 24.0} // XE3 or newer
-    {$LEGACYIFEND ON}
-    {$IF CompilerVersion >= 35.0} // 11.0 or newer
-      {$DEFINE STREAM_USES_NATIVEINT}
-    {$IFEND}
-  {$IFEND}
-  {$IF CompilerVersion >= 23.0}
-    {$DEFINE HAS_UNIT_SCOPE}
-    {$DEFINE HAS_RETURN_ADDRESS}
-  {$IFEND}
-  {$IF CompilerVersion <= 22.0} // XE or older
-    {$DEFINE CPUX86}
-  {$IFEND}
-{$ENDIF VER200}
-
-{$IFDEF NEXTGEN}
-  {$IF CompilerVersion >= 31.0} // 10.1 Berlin or newer
-    {$DEFINE SUPPORTS_UTF8STRING} // Delphi 10.1 Berlin supports UTF8String for mobile compilers
-  {$IFEND}
-{$ELSE}
+{$IFDEF FPC}
   {$DEFINE SUPPORTS_UTF8STRING}
-{$ENDIF}
+{$ELSE}
+  {$IFDEF VER200}
+    // Delphi 2009's ErrorInsight parser uses the CompilerVersion's memory address instead of 20.0, failing all the
+    // IF CompilerVersion compiler directives
+    {$DEFINE CPUX86}
+  {$ELSE}
+    {$IF CompilerVersion >= 24.0} // XE3 or newer
+      {$LEGACYIFEND ON}
+      {$IF CompilerVersion >= 35.0} // 11.0 or newer
+        {$DEFINE STREAM_USES_NATIVEINT}
+      {$IFEND}
+    {$IFEND}
+    {$IF CompilerVersion >= 23.0}
+      {$DEFINE HAS_UNIT_SCOPE}
+      {$DEFINE HAS_RETURN_ADDRESS}
+    {$IFEND}
+    {$IF CompilerVersion <= 22.0} // XE or older
+      {$DEFINE CPUX86}
+    {$IFEND}
+  {$ENDIF VER200}
 
-{$IFDEF AUTOREFCOUNT}
-  // Delphi's ARC is slow (RSP-9712). This switch enables a faster ARC handling and even skips memory
-  // barrier were possible.
-  {$DEFINE USE_FAST_AUTOREFCOUNT}
-{$ENDIF AUTOREFCOUNT}
+  {$IFDEF NEXTGEN}
+    {$IF CompilerVersion >= 31.0} // 10.1 Berlin or newer
+      {$DEFINE SUPPORTS_UTF8STRING} // Delphi 10.1 Berlin supports UTF8String for mobile compilers
+    {$IFEND}
+  {$ELSE}
+    {$DEFINE SUPPORTS_UTF8STRING}
+  {$ENDIF}
 
-{$IFDEF CPUX64}
-  {$IFNDEF LINUX64} // Linux 64 compiler doesn't support ASM for x64 code => LLVM
+  {$IFDEF AUTOREFCOUNT}
+    // Delphi's ARC is slow (RSP-9712). This switch enables a faster ARC handling and even skips memory
+    // barrier were possible.
+    {$DEFINE USE_FAST_AUTOREFCOUNT}
+  {$ENDIF AUTOREFCOUNT}
+
+  {$IFDEF CPUX64}
+    {$IFNDEF LINUX64} // Linux 64 compiler doesn't support ASM for x64 code => LLVM
+      {$DEFINE ASMSUPPORT}
+    {$ENDIF ~LINUX64}
+  {$ENDIF CPUX64}
+  {$IFDEF CPUX86}
     {$DEFINE ASMSUPPORT}
-  {$ENDIF ~LINUX64}
-{$ENDIF CPUX64}
-{$IFDEF CPUX86}
-  {$DEFINE ASMSUPPORT}
-{$ENDIF CPUX86}
-{$IFDEF EXTERNALLINKER} // implicates LLVM
-  {$UNDEF ASMSUPPORT}
-{$ENDIF EXTERNALLINKER}
+  {$ENDIF CPUX86}
+  {$IFDEF EXTERNALLINKER} // implies LLVM
+    {$UNDEF ASMSUPPORT}
+  {$ENDIF EXTERNALLINKER}
+{$ENDIF FPC}
 
 {--------------------------------------------------------------------------------------------------}
 { Optional features                                                                                }
@@ -144,6 +152,11 @@ unit JsonDataObjects;
   {$DEFINE SUPPORT_WINDOWS2000}
 
 {$ENDIF MSWINDOWS}
+
+{$IFDEF FPC}
+  // Not supported features in FPC
+  {$UNDEF USE_NAME_STRING_LITERAL}
+{$ENDIF FPC}
 
 interface
 
@@ -489,8 +502,10 @@ type
     //class operator Implicit(const Value: TJsonDataValueHelper): UInt64; overload;  conflicts with Int64 operator
     class operator Implicit(const Value: Double): TJsonDataValueHelper; overload;
     class operator Implicit(const Value: TJsonDataValueHelper): Double; overload;
+    {$IFNDEF FPC}
     class operator Implicit(const Value: Extended): TJsonDataValueHelper; overload;
     class operator Implicit(const Value: TJsonDataValueHelper): Extended; overload;
+    {$ENDIF ~FPC}
     class operator Implicit(const Value: TDateTime): TJsonDataValueHelper; overload;
     class operator Implicit(const Value: TJsonDataValueHelper): TDateTime; overload;
     class operator Implicit(const Value: Boolean): TJsonDataValueHelper; overload;
@@ -616,7 +631,7 @@ type
     {$ENDIF SUPPORTS_UTF8STRING}
     class function ParseUtf8Bytes(S: PByte; Len: Integer = -1; AProgress: PJsonReaderProgressRec = nil): TJsonBaseObject; static;
     class function Parse(S: PWideChar; Len: Integer = -1; AProgress: PJsonReaderProgressRec = nil): TJsonBaseObject; overload; static;
-    class function Parse(const S: UnicodeString; AProgress: PJsonReaderProgressRec = nil): TJsonBaseObject; overload; static; inline;
+    class function Parse(const S: string; AProgress: PJsonReaderProgressRec = nil): TJsonBaseObject; overload; static; inline;
     class function Parse(const Bytes: TBytes; Encoding: TEncoding = nil; ByteIndex: Integer = 0;
       ByteCount: Integer = -1; AProgress: PJsonReaderProgressRec = nil): TJsonBaseObject; overload; static;
     class function ParseFromFile(const FileName: string; Utf8WithoutBOM: Boolean = True; AProgress: PJsonReaderProgressRec = nil): TJsonBaseObject; static;
@@ -650,7 +665,7 @@ type
     procedure ToUtf8JSON(var Bytes: TBytes; Compact: Boolean = True); overload; inline;
     procedure ToUtf8JSON(var Bytes: TBytes; const Config: TJsonSerializationConfig; Compact: Boolean = True); overload;
     // ToString() returns a compact JSON string
-    function ToString: string; override;
+    function ToString: {$IFDEF FPC}AnsiString{$ELSE}string{$ENDIF}; override;
 
     function Clone: TJsonBaseObject;
 
@@ -1035,7 +1050,7 @@ uses
     {$ELSE}
   DateUtils,
     {$ENDIF MSWINDOWS}
-  Variants, RTLConsts, TypInfo, Math, SysConst;
+  Variants, {$IFNDEF FPC}RTLConsts,{$ENDIF} TypInfo, Math, SysConst;
   {$ENDIF HAS_UNIT_SCOPE}
 
 {$IF SizeOf(LongWord) <> 4}
@@ -1099,6 +1114,19 @@ const
   {$IFEND}
 
 type
+  {$IFDEF FPC}
+  PStrRec = ^TStrRec;
+  TStrRec = record
+    CodePage: TSystemCodePage;
+    EkenSize: Word;
+    {$ifdef CPU64}
+    { align fields }
+  	Dummy: DWORD;
+    {$endif CPU64}
+    RefCnt: SizeInt;
+    Length: SizeInt;
+  end;
+  {$ELSE}
   PStrRec = ^TStrRec;
   TStrRec = packed record
     {$IF defined(CPUX64) or defined(CPU64BITS)} // XE2-XE7 (CPUX64), XE8+ (CPU64BITS)
@@ -1109,6 +1137,7 @@ type
     RefCnt: Integer;
     Length: Integer;
   end;
+  {$ENDIF FPC}
 
   // TEncodingStrictAccess gives us access to the strict protected functions which are much easier
   // to use with TJsonStringBuilder than converting FData to a dynamic TCharArray.
@@ -1123,7 +1152,6 @@ type
   {$IFDEF USE_STRINGINTERN_FOR_NAMES}
   TStringIntern = record
   private type
-    PJsonStringEntry = ^TJsonStringEntry;
     TJsonStringEntry = record
       Next: Integer;
       Hash: Integer;
@@ -1252,7 +1280,7 @@ type
   private
     FDataString: UTF8String;
   protected
-    function Realloc(var NewCapacity: {$IF Defined(STREAM_USES_NATIVEINT)}NativeInt{$ELSE}Longint{$IFEND}): Pointer; override;
+    function Realloc(var NewCapacity: {$IFDEF FPC}PtrInt{$ELSE}{$IFDEF STREAM_USES_NATIVEINT}NativeInt{$ELSE}Longint{$ENDIF}{$ENDIF}): Pointer; override;
   public
     constructor Create;
     property DataString: UTF8String read FDataString;
@@ -1263,7 +1291,7 @@ type
   private
     FBytes: TBytes;
   protected
-    function Realloc(var NewCapacity: {$IF Defined(STREAM_USES_NATIVEINT)}NativeInt{$ELSE}Longint{$IFEND}): Pointer; override;
+    function Realloc(var NewCapacity: {$IFDEF FPC}PtrInt{$ELSE}{$IFDEF STREAM_USES_NATIVEINT}NativeInt{$ELSE}Longint{$ENDIF}{$ENDIF}): Pointer; override;
   public
     constructor Create;
     property Bytes: TBytes read FBytes;
@@ -1335,6 +1363,13 @@ end;
 
 type
   PDynArrayRec = ^TDynArrayRec;
+  {$IFDEF FPC}
+  TDynArrayRec = record
+    RefCnt: PtrInt;
+    High: TDynarrayIndex;
+    Data: record end;
+  end;
+  {$ELSE}
   TDynArrayRec = packed record
     {$IF defined(CPUX64) or defined(CPU64BITS)} // XE2-XE7 (CPUX64), XE8+ (CPU64BITS)
     _Padding: Integer;
@@ -1343,6 +1378,7 @@ type
     Length: NativeInt;
     Data: record end;
   end;
+  {$ENDIF FPC}
 
 procedure ByteArraySetLengthUninit(var A: TBytes; Count: Integer);
 var
@@ -1354,7 +1390,11 @@ begin
     begin
       GetMem(Pointer(P), SizeOf(TDynArrayRec) + Count * SizeOf(Byte));
       P.RefCnt := 1;
+      {$IFDEF FPC}
+      P.High := Count - 1;
+      {$ELSE}
       P.Length := Count;
+      {$ENDIF FPC}
       Pointer(A) := @P.Data;
     end;
   end
@@ -1373,15 +1413,25 @@ begin
     if P.RefCnt = 1 then
     begin
       ReallocMem(Pointer(P), SizeOf(TDynArrayRec) + Count * SizeOf(Byte));
+      {$IFDEF FPC}
+      P.High := Count - 1;
+      {$ELSE}
       P.Length := Count;
+      {$ENDIF FPC}
       Pointer(A) := @P.Data;
     end
     else
     begin
       GetMem(Pointer(P), SizeOf(TDynArrayRec) + Count * SizeOf(Integer));
+      {$IFDEF FPC}
+      Move(A[0], P.Data, (PDynArrayRec(PByte(A) - SizeOf(TDynArrayRec)).High + 1) * SizeOf(Byte));
+      P.RefCnt := 1;
+      P.High := Count - 1;
+      {$ELSE}
       Move(A[0], P.Data, PDynArrayRec(PByte(A) - SizeOf(TDynArrayRec)).Length * SizeOf(Byte));
       P.RefCnt := 1;
       P.Length := Count;
+      {$ENDIF FPC}
       Pointer(A) := @P.Data;
     end;
   end;
@@ -3060,8 +3110,17 @@ end;
 function DoubleToText(Buffer: PChar; const Value: Extended): Integer; {inline;}
 var
   I: Integer;
+  {$IFDEF FPC}
+  AnsiBuf: array[0..63 + 2] of AnsiChar;
+  {$ENDIF FPC}
 begin
+  {$IFDEF FPC}
+  Result := FloatToText(AnsiBuf, Value, ffGeneral, 15, 0, JSONFormatSettings);
+  for I := 0 to Result - 1 do
+    Buffer[I] := WideChar(Ord(AnsiBuf[I])); // we only have digits and -, +, ., E as characters
+  {$ELSE}
   Result := FloatToText(Buffer, Value, fvExtended, ffGeneral, 15, 0, JSONFormatSettings);
+  {$ENDIF FPC}
 
   // Add the decimal separator if FloatToText didn't add it, so that the data type of
   // the property doesn't change to Integer/Int64 if it is read again.
@@ -3406,8 +3465,7 @@ begin
   P := PChar(Pointer(S));
   if P <> nil then
   begin
-    //EndP := P + Length(S);  inlined Length introduces too much unnecessary code
-    EndP := P + PInteger(@PByte(S)[-4])^;
+    EndP := P + PStrRec(@PByte(S)[-SizeOf(TStrRec)]).Length; // inlined Length() introduces too much unnecessary code
 
     // find the first char that must be escaped
     F := P;
@@ -3611,9 +3669,9 @@ begin
   end;
 end;
 
-class function TJsonBaseObject.Parse(const S: UnicodeString; AProgress: PJsonReaderProgressRec): TJsonBaseObject;
+class function TJsonBaseObject.Parse(const S: string; AProgress: PJsonReaderProgressRec): TJsonBaseObject;
 begin
-  Result := Parse(PWideChar(Pointer(S)), Length(S), AProgress);
+  Result := Parse(PChar(Pointer(S)), Length(S), AProgress);
 end;
 
 class function TJsonBaseObject.Parse(S: PWideChar; Len: Integer; AProgress: PJsonReaderProgressRec): TJsonBaseObject;
@@ -4067,7 +4125,7 @@ begin
     ByteArraySetLengthUninit(Bytes, Size);
 end;
 
-function TJsonBaseObject.ToString: string;
+function TJsonBaseObject.ToString: {$IFDEF FPC}AnsiString{$ELSE}string{$ENDIF};
 begin
   Result := ToJSON;
 end;
@@ -5021,7 +5079,7 @@ end;
 {$IFDEF USE_LAST_NAME_STRING_LITERAL_CACHE}
 procedure TJsonObject.UpdateLastValueItem(const Name: string; Item: PJsonDataValue);
 begin
-  if (Pointer(Name) <> nil) and (PInteger(@PByte(Name)[-8])^ = -1) then // string literal
+  if (Pointer(Name) <> nil) and (PStrRec(@PByte(Name)[-SizeOf(TStrRec)]).RefCnt = -1) then // string literal
   begin
     FLastValueItem := Item;
     FLastValueItemNamePtr := Pointer(Name);
@@ -5176,7 +5234,7 @@ end;
 
 function TJsonObject.CompareSortedName(SortIndex1, SortIndex2: Integer): Integer;
 var
-  P1, P2: PString;
+  P1, P2: {$IFDEF FPC}PUnicodeString{$ELSE}PString{$ENDIF};
 begin
   P1 := @FNames[FSortedNames[SortIndex1]];
   P2 := @FNames[FSortedNames[SortIndex2]];
@@ -5306,7 +5364,7 @@ end;
 
 function TJsonObject.AddItem(const Name: string): PJsonDataValue;
 var
-  P: PString;
+  P: {$IFDEF FPC}PUnicodeString{$ELSE}PString{$ENDIF};
 begin
   if FCount = FCapacity then
     Grow;
@@ -5328,7 +5386,7 @@ end;
 
 function TJsonObject.InternAddItem(var Name: string): PJsonDataValue;
 var
-  P: PString;
+  P: {$IFDEF FPC}PUnicodeString{$ELSE}PString{$ENDIF};
 begin
   if FCount = FCapacity then
     Grow;
@@ -5864,7 +5922,7 @@ begin
 
               tkFloat:
                 begin
-                  PropType := PropList[Index].PropType^;
+                  PropType := PropList[Index].PropType{$IFNDEF FPC}^{$ENDIF};
                   if (PropType = TypeInfo(TDateTime)) or (PropType = TypeInfo(TDate)) or (PropType = TypeInfo(TTime)) then
                     SetFloatProp(AObject, PropList[Index], Item.DateTimeValue)
                   else
@@ -5875,7 +5933,11 @@ begin
                 SetInt64Prop(AObject, PropList[Index], Item.LongValue);
 
               tkString, tkLString, tkWString, tkUString:
+                {$IFDEF FPC}
+                SetUnicodeStrProp(AObject, PropList[Index], Item.Value);
+                {$ELSE}
                 SetStrProp(AObject, PropList[Index], Item.Value);
+                {$ENDIF FPC}
 
               tkSet:
                 SetSetProp(AObject, PropList[Index], Item.Value);
@@ -5962,7 +6024,7 @@ begin
 
             tkEnumeration:
               begin
-                PropType := PropList[Index].PropType^;
+                PropType := PropList[Index].PropType{$IFNDEF FPC}^{$ENDIF};
                 if (PropType = TypeInfo(Boolean)) or (PropType = TypeInfo(ByteBool)) or
                    (PropType = TypeInfo(WordBool)) or (PropType = TypeInfo(LongBool)) then
                   InternAdd(PropName, GetOrdProp(AObject, PropList[Index]) <> 0)
@@ -5972,7 +6034,7 @@ begin
 
             tkFloat:
               begin
-                PropType := PropList[Index].PropType^;
+                PropType := PropList[Index].PropType{$IFNDEF FPC}^{$ENDIF};
                 D := GetFloatProp(AObject, PropList[Index]);
                 if (PropType = TypeInfo(TDateTime)) or (PropType = TypeInfo(TDate)) or (PropType = TypeInfo(TTime)) then
                   InternAdd(PropName, TDateTime(D))
@@ -5986,7 +6048,11 @@ begin
             {$IFDEF USE_UTF8STRING_VALUES}
             tkLString:
               begin
+                {$IFDEF FPC}
+                A := GetStrProp(AObject, PropList[Index]);
+                {$ELSE}
                 A := GetAnsiStrProp(AObject, PropList[Index]);
+                {$ENDIF FPC}
                 if StringCodePage(A) = CP_UTF8 then
                   InternAdd(PropName, UTF8String(A))
                 else
@@ -5996,10 +6062,14 @@ begin
             tkLString,
             {$ENDIF USE_UTF8STRING_VALUES}
             tkString, tkWString, tkUString:
+              {$IFDEF FPC}
+              InternAdd(PropName, GetUnicodeStrProp(AObject, PropList[Index]));
+              {$ELSE}
               InternAdd(PropName, GetStrProp(AObject, PropList[Index]));
+              {$ENDIF FPC}
 
             tkSet:
-              InternAdd(PropName, GetSetProp(AObject, PropList[Index]));
+              InternAdd(PropName, GetSetProp(AObject, PropList[Index]{$IFDEF FPC}, False{$ENDIF}));
 
             tkVariant:
               begin
@@ -6015,10 +6085,15 @@ begin
                       InternAdd(PropName, Integer(V));
                     varLongWord:
                       InternAdd(PropName, Int64(LongWord(V)));
-                    {$IF CompilerVersion >= 23.0} // XE2+
+                    {$IFDEF FPC}
                     varInt64:
                       InternAdd(PropName, Int64(V));
-                    {$IFEND}
+                    {$ELSE}
+                      {$IF CompilerVersion >= 23.0} // XE2+
+                    varInt64:
+                      InternAdd(PropName, Int64(V));
+                      {$IFEND}
+                    {$ENDIF FPC}
                     varBoolean:
                       InternAdd(PropName, Boolean(V));
                   else
@@ -6319,12 +6394,12 @@ begin
       if Source <> nil then
       begin
         {$IFDEF DEBUG}
-        //if PInteger(@PByte(Source)[-8])^ = -1 then
+        //if PStrRec(@PByte(Source)[-SizeOf(TStrRec)]).RefCnt = -1 then
         //  InternAsgStringUsageError;
         {$ENDIF DEBUG}
         Pointer(PropName) := Source;
         // We are parsing JSON, no other thread knowns about the string => skip the CPU lock
-        Inc(PInteger(@PByte(Source)[-8])^);
+        Inc(PStrRec(@PByte(Source)[-SizeOf(TStrRec)]).RefCnt);
       end;
       {$ELSE}
       PropName := FStrings[Index].Name;
@@ -6356,7 +6431,7 @@ begin
   P := PWideChar(Pointer(Name));
   if P <> nil then
   begin
-    Len := PInteger(@PByte(Name)[-4])^; // Len := Length(Name);
+    Len := PStrRec(@PByte(Name)[-SizeOf(TStrRec)]).Length;
     P := @P[Len];
     Len := -Len + 4;
     Result := Integer(FNV_SEED);
@@ -6408,7 +6483,7 @@ begin
     Hash := AHash;
     Pointer(Name) := Pointer(S);
     // We are parsing JSON, no other thread knowns about the string => skip the CPU lock
-    Inc(PInteger(@PByte(Name)[-8])^);
+    Inc(PStrRec(@PByte(Name)[-SizeOf(TStrRec)]).RefCnt);
   end;
   Bucket^ := Index;
 end;
@@ -6810,11 +6885,13 @@ var
 begin
   P := FText;
   EndP := FTextEnd;
-  {$IF CompilerVersion <= 30.0} // Delphi 10 Seattle or older
-    {$IFNDEF CPUX64}
+  {$IFNDEF FPC}
+    {$IF CompilerVersion <= 30.0} // Delphi 10 Seattle or older
+      {$IFNDEF CPUX64}
   Ch := 0; // silence compiler warning
-    {$ENDIF ~CPUX64}
-  {$IFEND}
+      {$ENDIF ~CPUX64}
+    {$IFEND}
+  {$ENDIF ~FPC}
   while True do
   begin
     while True do
@@ -8148,6 +8225,7 @@ begin
     end;
 end;
 
+{$IFNDEF FPC}
 class operator TJsonDataValueHelper.Implicit(const Value: Extended): TJsonDataValueHelper;  // same as double
 begin
   Result.InternClear(iscNone);
@@ -8186,6 +8264,7 @@ begin
       Result := 0;
     end;
 end;
+{$ENDIF ~FPC}
 
 class operator TJsonDataValueHelper.Implicit(const Value: TDateTime): TJsonDataValueHelper;
 begin
@@ -9014,8 +9093,10 @@ begin
     // Build the buffer with the StrRec header so it can be easily mapped to a "native string" in
     // DoneToString.
     GetMem(Pointer(StrP), SizeOf(TStrRec) + (C + 1) * SizeOf(Char)); // allocate +1 char for the #0 that DoneToString() adds
+    {$IFNDEF FPC}
     StrP.CodePage := Word(DefaultUnicodeCodePage);
     StrP.ElemSize := SizeOf(Char);
+    {$ENDIF ~FPC}
     StrP.RefCnt := 1;
     StrP.Length := 0; // DoneToString set the correct value
   end;
@@ -9157,7 +9238,7 @@ begin
   end;
   Inc(LLen, P2Len);
 
-  FData[LLen] := Ch1;
+  FData[LLen] := Ch3;
   FLen := LLen + 1;
 end;
 
@@ -9187,9 +9268,11 @@ begin
   SetPointer(nil, 0);
 end;
 
-function TJsonUTF8StringStream.Realloc(var NewCapacity: {$IF Defined(STREAM_USES_NATIVEINT)}NativeInt{$ELSE}Longint{$IFEND}): Pointer;
+function TJsonUTF8StringStream.Realloc(
+  var NewCapacity: {$IFDEF FPC}PtrInt{$ELSE}{$IFDEF STREAM_USES_NATIVEINT}NativeInt{$ELSE}Longint{$ENDIF}{$ENDIF}
+  ): Pointer;
 var
-  L: {$IF Defined(STREAM_USES_NATIVEINT)}NativeInt{$ELSE}Longint{$IFEND};
+  L: {$IFDEF FPC}PtrInt{$ELSE}{$IFDEF STREAM_USES_NATIVEINT}NativeInt{$ELSE}Longint{$ENDIF}{$ENDIF};
 begin
   if NewCapacity <> Capacity then
   begin
@@ -9225,9 +9308,11 @@ begin
   SetPointer(nil, 0);
 end;
 
-function TJsonBytesStream.Realloc(var NewCapacity: {$IF Defined(STREAM_USES_NATIVEINT)}NativeInt{$ELSE}Longint{$IFEND}): Pointer;
+function TJsonBytesStream.Realloc(
+  var NewCapacity: {$IFDEF FPC}PtrInt{$ELSE}{$IFDEF STREAM_USES_NATIVEINT}NativeInt{$ELSE}Longint{$ENDIF}{$ENDIF}
+  ): Pointer;
 var
-  L: {$IF Defined(STREAM_USES_NATIVEINT)}NativeInt{$ELSE}Longint{$IFEND};
+  L: {$IFDEF FPC}PtrInt{$ELSE}{$IFDEF STREAM_USES_NATIVEINT}NativeInt{$ELSE}Longint{$ENDIF}{$ENDIF};
 begin
   if NewCapacity <> Capacity then
   begin
