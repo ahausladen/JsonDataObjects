@@ -11,7 +11,7 @@ unit TestJsonDataObjects;
 interface
 
 uses
-  System.SysUtils, System.Classes, System.Variants,
+  Winapi.Windows, System.SysUtils, System.Classes, System.Variants,
   TestFramework, JsonDataObjects;
 
 type
@@ -1201,6 +1201,24 @@ begin
   CheckException(ParseBrokenJSON8, EJsonParserException);
 end;
 
+function UtcDateTimeToLocalDateTime(UtcDateTime: TDateTime): TDateTime;
+{$IFDEF MSWINDOWS}
+var
+  UtcTime, LocalTime: TSystemTime;
+begin
+  DateTimeToSystemTime(UtcDateTime, UtcTime);
+  if SystemTimeToTzSpecificLocalTime(nil, UtcTime, LocalTime) then
+    Result := SystemTimeToDateTime(LocalTime)
+  else
+    Result := UtcDateTime;
+end;
+{$ELSE}
+begin
+  Result := TTimeZone.Local.ToLocalTime(UtcDateTime);
+end;
+{$ENDIF MSWINDOWS}
+
+
 procedure TestTJsonBaseObject.TestDateTimeToJSON;
 var
   S: string;
@@ -1255,6 +1273,42 @@ begin
   TJsonBaseObject.JSONToDateTime('2009-01-01T12:00:00+0100');
   TJsonBaseObject.JSONToDateTime('2015-02-14T22:58+01:00');
   TJsonBaseObject.JSONToDateTime('2015-02-14T22:58+0100');
+
+  // Use of sub-milliseconds
+  ExpectDt := UtcDateTimeToLocalDateTime(EncodeDate(2025, 11, 28) + EncodeTime(4, 57, 30, 411));
+    Dt := TJsonBaseObject.JSONToDateTime('2025-11-28T04:57:30.4113771+00:00');
+    CheckEquals(ExpectDt, Dt, 'expected datetime: ' + FormatDateTime('yyyy-mm-dd hh:mm:ss.zzz', ExpectDt) + ', returned: ' + FormatDateTime('yyyy-mm-dd hh:mm:ss.zzz', Dt));
+
+  // Use of sub-milliseconds with round up
+  ExpectDt := UtcDateTimeToLocalDateTime(EncodeDate(2025, 11, 28) + EncodeTime(4, 57, 30, 412));
+    Dt := TJsonBaseObject.JSONToDateTime('2025-11-28T04:57:30.4115771+00:00');
+    CheckEquals(ExpectDt, Dt, 'expected datetime: ' + FormatDateTime('yyyy-mm-dd hh:mm:ss.zzz', ExpectDt) + ', returned: ' + FormatDateTime('yyyy-mm-dd hh:mm:ss.zzz', Dt));
+
+  // Use of sub-milliseconds with round up
+  ExpectDt := UtcDateTimeToLocalDateTime(EncodeDate(2025, 11, 28) + EncodeTime(4, 57, 30, 412));
+    Dt := TJsonBaseObject.JSONToDateTime('2025-11-28T04:57:30.4115+00:00');
+    CheckEquals(ExpectDt, Dt, 'expected datetime: ' + FormatDateTime('yyyy-mm-dd hh:mm:ss.zzz', ExpectDt) + ', returned: ' + FormatDateTime('yyyy-mm-dd hh:mm:ss.zzz', Dt));
+
+  // Use of sub-milliseconds
+  ExpectDt := UtcDateTimeToLocalDateTime(EncodeDate(2025, 11, 28) + EncodeTime(4, 57, 30, 411));
+    Dt := TJsonBaseObject.JSONToDateTime('2025-11-28T04:57:30.4114+00:00');
+    CheckEquals(ExpectDt, Dt, 'expected datetime: ' + FormatDateTime('yyyy-mm-dd hh:mm:ss.zzz', ExpectDt) + ', returned: ' + FormatDateTime('yyyy-mm-dd hh:mm:ss.zzz', Dt));
+
+  // Use of fraction of a second
+  ExpectDt := UtcDateTimeToLocalDateTime(EncodeDate(2025, 11, 28) + EncodeTime(0, 0, 0, 100));
+    Dt := TJsonBaseObject.JSONToDateTime('2025-11-28T00:00:00.1+00:00');
+    CheckEquals(ExpectDt, Dt, 'expected datetime: ' + FormatDateTime('yyyy-mm-dd hh:mm:ss.zzz', ExpectDt) + ', returned: ' + FormatDateTime('yyyy-mm-dd hh:mm:ss.zzz', Dt));
+
+  // Use of fraction of a second
+  ExpectDt := UtcDateTimeToLocalDateTime(EncodeDate(2025, 11, 28) + EncodeTime(0, 0, 0, 10));
+    Dt := TJsonBaseObject.JSONToDateTime('2025-11-28T00:00:00.01+00:00');
+    CheckEquals(ExpectDt, Dt, 'expected datetime: ' + FormatDateTime('yyyy-mm-dd hh:mm:ss.zzz', ExpectDt) + ', returned: ' + FormatDateTime('yyyy-mm-dd hh:mm:ss.zzz', Dt));
+
+  // Use of fraction of a second
+  ExpectDt := UtcDateTimeToLocalDateTime(EncodeDate(2025, 11, 28) + EncodeTime(0, 0, 0, 1));
+    Dt := TJsonBaseObject.JSONToDateTime('2025-11-28T00:00:00.001+00:00');
+    CheckEquals(ExpectDt, Dt, 'expected datetime: ' + FormatDateTime('yyyy-mm-dd hh:mm:ss.zzz', ExpectDt) + ', returned: ' + FormatDateTime('yyyy-mm-dd hh:mm:ss.zzz', Dt));
+
   CheckNotEquals(0, TJsonBaseObject.JSONToDateTime('2015-02-14T22:58'));
 end;
 
