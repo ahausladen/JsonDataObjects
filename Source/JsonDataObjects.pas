@@ -1633,20 +1633,27 @@ var
   Hour, Min, Sec, MSec: Word;
 begin
   DateTimeToSystemTime(Value, LocalTime);
-  Result := Format('%.4d-%.2d-%.2dT%.2d:%.2d:%.2d.%.3d',
-    [LocalTime.wYear, LocalTime.wMonth, LocalTime.wDay,
-     LocalTime.wHour, LocalTime.wMinute, LocalTime.wSecond, LocalTime.wMilliseconds]);
+  if LocalTime.wMilliseconds = 0 then
+    Result := Format('%.4d-%.2d-%.2dT%.2d:%.2d:%.2d',
+      [LocalTime.wYear, LocalTime.wMonth, LocalTime.wDay,
+       LocalTime.wHour, LocalTime.wMinute, LocalTime.wSecond])
+  else
+    Result := Format('%.4d-%.2d-%.2dT%.2d:%.2d:%.2d.%.3d',
+      [LocalTime.wYear, LocalTime.wMonth, LocalTime.wDay,
+       LocalTime.wHour, LocalTime.wMinute, LocalTime.wSecond, LocalTime.wMilliseconds]);
+
+  Offset := 0;
   if TzSpecificLocalTimeToSystemTime(nil, LocalTime, UtcTime) then
   begin
     Offset := Value - SystemTimeToDateTime(UtcTime);
     DecodeTime(Offset, Hour, Min, Sec, MSec);
-    if Offset < 0 then
-      Result := Format('%s-%.2d:%.2d', [Result, Hour, Min])
-    else if Offset > 0 then
-      Result := Format('%s+%.2d:%.2d', [Result, Hour, Min])
-    else
-      Result := Result + 'Z';
   end;
+  if Offset < 0 then
+    Result := Format('%s-%.2d:%.2d', [Result, Hour, Min])
+  else if Offset > 0 then
+    Result := Format('%s+%.2d:%.2d', [Result, Hour, Min])
+  else
+    Result := Result + 'Z';
 end;
 {$ELSE}
 var
@@ -1655,7 +1662,11 @@ var
 begin
   DecodeDate(Value, Year, Month, Day);
   DecodeTime(Value, Hour, Minute, Second, MilliSeconds);
-  Result := Format('%.4d-%.2d-%.2dT%.2d:%.2d:%.2d.%.3d', [Year, Month, Day, Hour, Minute, Second, Milliseconds]);
+  if MilliSeconds = 0 then
+    Result := Format('%.4d-%.2d-%.2dT%.2d:%.2d:%.2d', [Year, Month, Day, Hour, Minute, Second])
+  else
+    Result := Format('%.4d-%.2d-%.2dT%.2d:%.2d:%.2d.%.3d', [Year, Month, Day, Hour, Minute, Second, Milliseconds]);
+
   Offset := Value - TTimeZone.Local.ToUniversalTime(Value);
   DecodeTime(Offset, Hour, Minute, Second, MilliSeconds);
   if Offset < 0 then
@@ -3318,8 +3329,12 @@ var
 begin
   DecodeDate(UtcDateTime, Year, Month, Day);
   DecodeTime(UtcDateTime, Hour, Minute, Second, MilliSeconds);
-  Result := Format('%.4d-%.2d-%.2dT%.2d:%.2d:%.2d.%.3dZ',
-    [Year, Month, Day, Hour, Minute, Second, Milliseconds]);
+  if Milliseconds = 0 then
+    Result := Format('%.4d-%.2d-%.2dT%.2d:%.2d:%.2dZ',
+      [Year, Month, Day, Hour, Minute, Second])
+  else
+    Result := Format('%.4d-%.2d-%.2dT%.2d:%.2d:%.2d.%.3dZ',
+      [Year, Month, Day, Hour, Minute, Second, Milliseconds]);
 end;
 
 function TJsonBaseObject.Clone: TJsonBaseObject;
@@ -3344,9 +3359,14 @@ begin
     DateTimeToSystemTime(Value, LocalTime);
     if not TzSpecificLocalTimeToSystemTime(nil, LocalTime, UtcTime) then
       UtcTime := LocalTime;
-    Result := Format('%.4d-%.2d-%.2dT%.2d:%.2d:%.2d.%.3dZ',
-      [UtcTime.wYear, UtcTime.wMonth, UtcTime.wDay,
-       UtcTime.wHour, UtcTime.wMinute, UtcTime.wSecond, UtcTime.wMilliseconds]);
+    if UtcTime.wMilliseconds = 0 then
+      Result := Format('%.4d-%.2d-%.2dT%.2d:%.2d:%.2dZ',
+        [UtcTime.wYear, UtcTime.wMonth, UtcTime.wDay,
+         UtcTime.wHour, UtcTime.wMinute, UtcTime.wSecond])
+    else
+      Result := Format('%.4d-%.2d-%.2dT%.2d:%.2d:%.2d.%.3dZ',
+        [UtcTime.wYear, UtcTime.wMonth, UtcTime.wDay,
+         UtcTime.wHour, UtcTime.wMinute, UtcTime.wSecond, UtcTime.wMilliseconds]);
   end
   else
     Result := DateTimeToISO8601(Value);

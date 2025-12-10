@@ -1753,6 +1753,30 @@ var
   S: string;
   dt: TDateTime;
 begin
+  dt := EncodeDate(2018, 08, 13) + EncodeTime(0, 0, 0, 1);
+  O := TJsonObject.Create;
+  try
+    O.D['DateTime'] := dt;
+    O.DUtc['UtcDateTime'] := dt;
+    S := O.ToJSON;
+
+    CheckEquals('{"DateTime":"' + TJsonBaseObject.DateTimeToJSON(dt, True) + '","UtcDateTime":"2018-08-13T00:00:00.001Z"}', S, 'DateTime/UtcDateTime as string');
+  finally
+    O.Free;
+  end;
+
+  dt := EncodeDate(2018, 08, 13) + EncodeTime(0, 0, 0, 10);
+  O := TJsonObject.Create;
+  try
+    O.D['DateTime'] := dt;
+    O.DUtc['UtcDateTime'] := dt;
+    S := O.ToJSON;
+
+    CheckEquals('{"DateTime":"' + TJsonBaseObject.DateTimeToJSON(dt, True) + '","UtcDateTime":"2018-08-13T00:00:00.010Z"}', S, 'DateTime/UtcDateTime as string');
+  finally
+    O.Free;
+  end;
+
   dt := EncodeDate(2018, 08, 13) {+ EncodeTime(0, 0, 0, 0)};
   O := TJsonObject.Create;
   try
@@ -1760,7 +1784,7 @@ begin
     O.DUtc['UtcDateTime'] := dt;
     S := O.ToJSON;
 
-    CheckEquals('{"DateTime":"' + TJsonBaseObject.DateTimeToJSON(dt, True) + '","UtcDateTime":"2018-08-13T00:00:00.000Z"}', S, 'DateTime/UtcDateTime as string');
+    CheckEquals('{"DateTime":"' + TJsonBaseObject.DateTimeToJSON(dt, True) + '","UtcDateTime":"2018-08-13T00:00:00Z"}', S, 'DateTime/UtcDateTime as string');
   finally
     O.Free;
   end;
