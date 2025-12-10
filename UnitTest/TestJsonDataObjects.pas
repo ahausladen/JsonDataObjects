@@ -34,6 +34,7 @@ type
     procedure ParseBrokenJSON5;
     procedure ParseBrokenJSON6;
     procedure ParseBrokenJSON7;
+    procedure ParseBrokenJSON8;
     procedure ObjectToVariantException;
     procedure ArrayToVariantException;
     procedure UnassigendVariantException;
@@ -1183,6 +1184,11 @@ begin
   TJsonBaseObject.Parse('[ "abc\n\').Free;
 end;
 
+procedure TestTJsonBaseObject.ParseBrokenJSON8;
+begin
+  (TJsonObject.Parse('{"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"tool": {"name": "execute_shell_command", "arguments": {"command": "dir C:\\"}}}}}') as TJsonObject).Free;
+end;
+
 procedure TestTJsonBaseObject.TestParseBrokenJSON;
 begin
   CheckException(ParseBrokenJSON1, EJsonParserException);
@@ -1192,6 +1198,7 @@ begin
   CheckException(ParseBrokenJSON5, EJsonParserException);
   CheckException(ParseBrokenJSON6, EJsonParserException);
   CheckException(ParseBrokenJSON7, EJsonParserException);
+  CheckException(ParseBrokenJSON8, EJsonParserException);
 end;
 
 procedure TestTJsonBaseObject.TestDateTimeToJSON;
