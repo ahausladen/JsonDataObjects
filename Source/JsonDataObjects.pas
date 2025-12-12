@@ -3692,8 +3692,10 @@ begin
     begin
       if (L > 0) and (P^ = Byte(Ord('['))) then
         Result := TJsonArray.Create
+      else if P^ = Byte(Ord('{')) then
+        Result := TJsonObject.Create
       else
-        Result := TJsonObject.Create;
+        Result := TJsonPrimitiveValue.Create;
 
       {$IFDEF AUTOREFCOUNT}
       Result.FromUtf8JSON(S, Len, AProgress);
