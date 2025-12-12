@@ -1101,6 +1101,11 @@ const
     1E10, 1E11, 1E12, 1E13, 1E14, 1E15, 1E16, 1E17, 1E18
   );
 
+  ReciprocalPower10: array[0..18] of Double = (
+    1/1E0, 1/1E1, 1/1E2, 1/1E3, 1/1E4, 1/1E5, 1/1E6, 1/1E7, 1/1E8, 1/1E9,
+    1/1E10, 1/1E11, 1/1E12, 1/1E13, 1/1E14, 1/1E15, 1/1E16, 1/1E17, 1/1E18
+  );
+
   // XE7 broke string literal collapsing
 var
   sTrue: string = 'true';
@@ -7225,7 +7230,7 @@ var
   {$ENDIF ~CPUARM}
   EndInt64P: PByte;
   Ch: Byte;
-  Value, Scale: Double;
+  Value, FractionValue, Scale: Double;
   Exponent, IntValue: Integer;
   Neg, NegE: Boolean;
   DigitCount: Integer;
@@ -7293,35 +7298,37 @@ begin
     FLook.U := ParseUInt64Utf8(F, P);
     if (DigitCount = 20) and (FLook.U mod 10 <> PByte(P - 1)^ - Byte(Ord('0'))) then // overflow => too large
       Value := ParseAsDoubleUtf8(F, P)
-    else if Neg and ((DigitCount = 20) or ((DigitCount = 19) and (FLook.HI and $80000000 <> 0))) then
-      // "negative UInt64" doesn't fit into UInt64/Int64 => use Double
-      Value := FLook.U
     else
     begin
-      FLook.Kind := jtkLong;
-      case DigitCount of
-        19:
-         if FLook.HI and $80000000 <> 0 then // can't be negative because we cached that case already
-           FLook.Kind := jtkULong;
-        20:
-          FLook.Kind := jtkULong;
-      end;
-
-      if not (P^ in [Ord('.'), Ord('E'), Ord('e')]) then
+      if Neg and ((DigitCount = 20) or ((DigitCount = 19) and (FLook.HI and $80000000 <> 0))) then
+        // "negative UInt64" doesn't fit into UInt64/Int64 => use Double
+      else
       begin
-        // just an integer
-        if Neg then
-        begin
-          if (FLook.HI = 0) and (FLook.I >= 0) then // 32bit Integer
-          begin
-            FLook.I := -FLook.I;
-            FLook.Kind := jtkInt;
-          end
-          else                 // 64bit Integer
-            FLook.L := -FLook.L;
+        FLook.Kind := jtkLong;
+        case DigitCount of
+          19:
+            if FLook.HI and $80000000 <> 0 then // can't be negative because we catched that case already
+              FLook.Kind := jtkULong;
+          20:
+            FLook.Kind := jtkULong;
         end;
-        FText := P;
-        Exit;
+
+        if not (P^ in [Ord('.'), Ord('E'), Ord('e')]) then
+        begin
+          // just an integer
+          if Neg then
+          begin
+            if (FLook.HI = 0) and (FLook.I >= 0) then // 32bit Integer
+            begin
+              FLook.I := -FLook.I;
+              FLook.Kind := jtkInt;
+            end
+            else // 64bit Integer
+              FLook.L := -FLook.L;
+          end;
+          FText := P;
+          Exit;
+        end;
       end;
       Value := FLook.U;
     end;
@@ -7333,15 +7340,49 @@ begin
   if (P + 1 < EndP) and (P^ = Byte(Ord('.'))) then
   begin
     Inc(P);
+    // skip leading '0' digits
+    F := P;
+    while (P < EndP) and (P^ = Byte(Ord('0'))) do
+      Inc(P);
+    DigitCount := P - F;
+    // find the last decimal digit
     F := P;
     EndInt64P := F + 18;
     if EndInt64P > EndP then
       EndInt64P := EndP;
     while (P < EndInt64P) and (P^ in [Ord('0')..Ord('9')]) do
       Inc(P);
-    Value := Value + ParseUInt64Utf8(F, P) / Power10[P - F];
 
-    // "Double" can't handle that many digits
+    // if we have up to 18 digits in total, we can use one floating point multipication
+    if DigitCount + (P - F) <= 18 then
+    begin
+      F := F - DigitCount;
+      FractionValue := ParseUInt64Utf8(F, P) * ReciprocalPower10[P - F];
+    end
+    else
+    begin
+      FractionValue := ParseUInt64Utf8(F, P) * ReciprocalPower10[P - F];
+      if DigitCount > 0 then
+      begin
+        Scale := 1;
+        while DigitCount >= 50 do
+        begin
+          Scale := Scale * (1/1E50);
+          Dec(DigitCount, 50);
+        end;
+        while DigitCount >= 18 do
+        begin
+          Scale := Scale * (1/1E18);
+          Dec(DigitCount, 18);
+        end;
+        if DigitCount > 0 then
+          FractionValue := FractionValue * ReciprocalPower10[DigitCount] * Scale;
+      end;
+    end;
+
+    Value := Value + FractionValue;
+
+    // "Double" can't handle that many significant digits
     while (P < EndP) and (P^ in [Ord('0')..Ord('9')]) do
       Inc(P);
   end;
@@ -7351,7 +7392,7 @@ begin
   begin
     Inc(P);
     NegE := False;
-    if (P < EndP) then
+    if P < EndP then
     begin
       case P^ of
         Ord('-'):
@@ -7406,10 +7447,10 @@ begin
     end;
   end;
 
-  if Neg then
-    FLook.F := -Value
+  if not Neg then
+    FLook.F := Value
   else
-    FLook.F := Value;
+    FLook.F := -Value;
   FLook.Kind := jtkFloat;
   FText := P;
 end;
@@ -7756,7 +7797,7 @@ var
   {$ENDIF ~CPUARM}
   EndInt64P: PChar;
   Ch: Char;
-  Value, Scale: Double;
+  Value, FractionValue, Scale: Double;
   Exponent, IntValue: Integer;
   Neg, NegE: Boolean;
   DigitCount: Integer;
@@ -7824,35 +7865,37 @@ begin
     FLook.U := ParseUInt64(F, P);
     if (DigitCount = 20) and (FLook.U mod 10 <> Ord(PWideChar(P - 1)^) - Ord('0')) then // overflow => too large
       Value := ParseAsDouble(F, P)
-    else if Neg and ((DigitCount = 20) or ((DigitCount = 19) and (FLook.HI and $80000000 <> 0))) then
-      // "negative UInt64" doesn't fit into UInt64/Int64 => use Double
-      Value := FLook.U
     else
     begin
-      FLook.Kind := jtkLong;
-      case DigitCount of
-        19:
-         if FLook.HI and $80000000 <> 0 then // can't be negative because we cached that case already
-           FLook.Kind := jtkULong;
-        20:
-          FLook.Kind := jtkULong;
-      end;
-
-      if not (P^ in ['.', 'E', 'e']) then
+      if Neg and ((DigitCount = 20) or ((DigitCount = 19) and (FLook.HI and $80000000 <> 0))) then
+        // "negative UInt64" doesn't fit into UInt64/Int64 => use Double
+      else
       begin
-        // just an integer
-        if Neg then
-        begin
-          if (FLook.HI = 0) and (FLook.I >= 0) then // 32bit Integer
-          begin
-            FLook.I := -FLook.I;
-            FLook.Kind := jtkInt;
-          end
-          else                 // 64bit Integer
-            FLook.L := -FLook.L;
+        FLook.Kind := jtkLong;
+        case DigitCount of
+          19:
+            if FLook.HI and $80000000 <> 0 then // can't be negative because we catched that case already
+              FLook.Kind := jtkULong;
+          20:
+            FLook.Kind := jtkULong;
         end;
-        FText := P;
-        Exit;
+
+        if not (P^ in ['.', 'E', 'e']) then
+        begin
+          // just an integer
+          if Neg then
+          begin
+            if (FLook.HI = 0) and (FLook.I >= 0) then // 32bit Integer
+            begin
+              FLook.I := -FLook.I;
+              FLook.Kind := jtkInt;
+            end
+            else // 64bit Integer
+              FLook.L := -FLook.L;
+          end;
+          FText := P;
+          Exit;
+        end;
       end;
       Value := FLook.U;
     end;
@@ -7864,15 +7907,49 @@ begin
   if (P + 1 < EndP) and (P^ = '.') then
   begin
     Inc(P);
+    // skip leading '0' digits
+    F := P;
+    while (P < EndP) and (P^ = '0') do
+      Inc(P);
+    DigitCount := P - F;
+    // find the last decimal digit
     F := P;
     EndInt64P := F + 18;
     if EndInt64P > EndP then
       EndInt64P := EndP;
     while (P < EndInt64P) and (P^ in ['0'..'9']) do
       Inc(P);
-    Value := Value + ParseUInt64(F, P) / Power10[P - F];
 
-    // "Double" can't handle that many digits
+    // if we have up to 18 digits in total, we can use one floating point multipication
+    if DigitCount + (P - F) <= 18 then
+    begin
+      F := F - DigitCount;
+      FractionValue := ParseUInt64(F, P) * ReciprocalPower10[P - F];
+    end
+    else
+    begin
+      FractionValue := ParseUInt64(F, P) * ReciprocalPower10[P - F];
+      if DigitCount > 0 then
+      begin
+        Scale := 1;
+        while DigitCount >= 50 do
+        begin
+          Scale := Scale * (1/1E50);
+          Dec(DigitCount, 50);
+        end;
+        while DigitCount >= 18 do
+        begin
+          Scale := Scale * (1/1E18);
+          Dec(DigitCount, 18);
+        end;
+        if DigitCount > 0 then
+          FractionValue := FractionValue * ReciprocalPower10[DigitCount] * Scale;
+      end;
+    end;
+
+    Value := Value + FractionValue;
+
+    // "Double" can't handle that many significant digits
     while (P < EndP) and (P^ in ['0'..'9']) do
       Inc(P);
   end;
@@ -7882,7 +7959,7 @@ begin
   begin
     Inc(P);
     NegE := False;
-    if (P < EndP) then
+    if P < EndP then
     begin
       case P^ of
         '-':
@@ -7937,10 +8014,10 @@ begin
     end;
   end;
 
-  if Neg then
-    FLook.F := -Value
+  if not Neg then
+    FLook.F := Value
   else
-    FLook.F := Value;
+    FLook.F := -Value;
   FLook.Kind := jtkFloat;
   FText := P;
 end;

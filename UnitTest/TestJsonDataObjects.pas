@@ -77,6 +77,7 @@ type
     procedure TestDateTimeToJsonString;
     procedure TestSmallFloatValues;
     procedure TestPrimitiveValue;
+    procedure TestExtremNumbers;
   end;
 
   TestTJsonArray = class(TTestCase)
@@ -1970,6 +1971,204 @@ begin
   end;
 
   CheckFalse(IsValidJSON('abc'));
+end;
+
+procedure TestTJsonBaseObject.TestExtremNumbers;
+var
+  V: TJsonPrimitiveValue;
+  d: Double;
+begin
+  V := TJsonBaseObject.ParseUtf8('0.9223372036854775808') as TJsonPrimitiveValue;
+  try
+    d := 0.9223372036854775808;
+    CheckFalse(V.Item.IsNull);
+    CheckTrue(V.Item.Typ = jdtFloat);
+    CheckEquals('0.922337203685478', V.ToJSON());
+    CheckEquals(FloatToStr(d), FloatToStr(V.Item.FloatValue));
+  finally
+    V.Free;
+  end;
+  V := TJsonBaseObject.Parse('0.9223372036854775808') as TJsonPrimitiveValue;
+  try
+    d := 0.9223372036854775808;
+    CheckFalse(V.Item.IsNull);
+    CheckTrue(V.Item.Typ = jdtFloat);
+    CheckEquals('0.922337203685478', V.ToJSON());
+    CheckEquals(FloatToStr(d), FloatToStr(V.Item.FloatValue));
+  finally
+    V.Free;
+  end;
+
+  V := TJsonBaseObject.ParseUtf8('0.9223372036854775809') as TJsonPrimitiveValue;
+  try
+    d := 0.9223372036854775809;
+    CheckFalse(V.Item.IsNull);
+    CheckTrue(V.Item.Typ = jdtFloat);
+    CheckEquals('0.922337203685478', V.ToJSON());
+    CheckEquals(FloatToStr(d), FloatToStr(V.Item.FloatValue));
+  finally
+    V.Free;
+  end;
+  V := TJsonBaseObject.Parse('0.9223372036854775809') as TJsonPrimitiveValue;
+  try
+    d := 0.9223372036854775809;
+    CheckFalse(V.Item.IsNull);
+    CheckTrue(V.Item.Typ = jdtFloat);
+    CheckEquals('0.922337203685478', V.ToJSON());
+    CheckEquals(FloatToStr(d), FloatToStr(V.Item.FloatValue));
+  finally
+    V.Free;
+  end;
+
+  d := 0.000000000000000000000000000000000000001;
+  V := TJsonBaseObject.ParseUtf8('0.000000000000000000000000000000000000001') as TJsonPrimitiveValue;
+  try
+    CheckFalse(V.Item.IsNull);
+    CheckTrue(V.Item.Typ = jdtFloat);
+    CheckEquals(FloatToStr(d), FloatToStr(V.Item.FloatValue));
+    CheckEquals('1E-39', V.ToJSON());
+  finally
+    V.Free;
+  end;
+  d := 0.000000000000000000000000000000000000001;
+  V := TJsonBaseObject.Parse('0.000000000000000000000000000000000000001') as TJsonPrimitiveValue;
+  try
+    CheckFalse(V.Item.IsNull);
+    CheckTrue(V.Item.Typ = jdtFloat);
+    CheckEquals(FloatToStr(d), FloatToStr(V.Item.FloatValue));
+    CheckEquals('1E-39', V.ToJSON());
+  finally
+    V.Free;
+  end;
+
+  d := 100000000000000000000000000000000000000.0;
+  V := TJsonBaseObject.ParseUtf8('100000000000000000000000000000000000000.0') as TJsonPrimitiveValue;
+  try
+    CheckFalse(V.Item.IsNull);
+    CheckTrue(V.Item.Typ = jdtFloat);
+    CheckEquals(FloatToStr(d), FloatToStr(V.Item.FloatValue));
+    CheckEquals('1E38', V.ToJSON());
+  finally
+    V.Free;
+  end;
+  d := 100000000000000000000000000000000000000.0;
+  V := TJsonBaseObject.Parse('100000000000000000000000000000000000000.0') as TJsonPrimitiveValue;
+  try
+    CheckFalse(V.Item.IsNull);
+    CheckTrue(V.Item.Typ = jdtFloat);
+    CheckEquals(FloatToStr(d), FloatToStr(V.Item.FloatValue));
+    CheckEquals('1E38', V.ToJSON());
+  finally
+    V.Free;
+  end;
+
+  V := TJsonBaseObject.ParseUtf8('0.9223372036854775808') as TJsonPrimitiveValue;
+  try
+    CheckFalse(V.Item.IsNull);
+    CheckTrue(V.Item.Typ = jdtFloat);
+    CheckEquals('0.922337203685478', V.ToJSON());
+  finally
+    V.Free;
+  end;
+  V := TJsonBaseObject.Parse('0.9223372036854775808') as TJsonPrimitiveValue;
+  try
+    CheckFalse(V.Item.IsNull);
+    CheckTrue(V.Item.Typ = jdtFloat);
+    CheckEquals('0.922337203685478', V.ToJSON());
+  finally
+    V.Free;
+  end;
+
+  V := TJsonBaseObject.ParseUtf8('9223372036854775808') as TJsonPrimitiveValue;
+  try
+    CheckFalse(V.Item.IsNull);
+    CheckTrue(V.Item.Typ = jdtULong);
+    CheckEquals(UInt64(9223372036854775808), V.Item.ULongValue);
+    CheckEquals('9223372036854775808', V.ToJSON());
+  finally
+    V.Free;
+  end;
+  V := TJsonBaseObject.Parse('9223372036854775808') as TJsonPrimitiveValue;
+  try
+    CheckFalse(V.Item.IsNull);
+    CheckTrue(V.Item.Typ = jdtULong);
+    CheckEquals(UInt64(9223372036854775808), V.Item.ULongValue);
+    CheckEquals('9223372036854775808', V.ToJSON());
+  finally
+    V.Free;
+  end;
+
+  V := TJsonBaseObject.ParseUtf8('922337203685477580800') as TJsonPrimitiveValue;
+  try
+    CheckFalse(V.Item.IsNull);
+    CheckTrue(V.Item.Typ = jdtFloat);
+    CheckEquals('9.22337203685478E20', V.ToJSON());
+  finally
+    V.Free;
+  end;
+  V := TJsonBaseObject.Parse('922337203685477580800') as TJsonPrimitiveValue;
+  try
+    CheckFalse(V.Item.IsNull);
+    CheckTrue(V.Item.Typ = jdtFloat);
+    CheckEquals('9.22337203685478E20', V.ToJSON());
+  finally
+    V.Free;
+  end;
+
+  V := TJsonBaseObject.ParseUtf8('15744383709429629494') as TJsonPrimitiveValue;
+  try
+    CheckFalse(V.Item.IsNull);
+    CheckTrue(V.Item.Typ = jdtULong);
+    CheckEquals(UInt64(15744383709429629494), V.Item.ULongValue);
+    CheckEquals('15744383709429629494', V.ToJSON());
+  finally
+    V.Free;
+  end;
+  V := TJsonBaseObject.Parse('15744383709429629494') as TJsonPrimitiveValue;
+  try
+    CheckFalse(V.Item.IsNull);
+    CheckTrue(V.Item.Typ = jdtULong);
+    CheckEquals(UInt64(15744383709429629494), V.Item.ULongValue);
+    CheckEquals('15744383709429629494', V.ToJSON());
+  finally
+    V.Free;
+  end;
+
+  V := TJsonBaseObject.ParseUtf8('18446744073709551615') as TJsonPrimitiveValue;
+  try
+    CheckFalse(V.Item.IsNull);
+    CheckTrue(V.Item.Typ = jdtULong);
+    CheckEquals(UInt64(18446744073709551615), V.Item.ULongValue);
+    CheckEquals('18446744073709551615', V.ToJSON());
+  finally
+    V.Free;
+  end;
+  V := TJsonBaseObject.Parse('18446744073709551615') as TJsonPrimitiveValue;
+  try
+    CheckFalse(V.Item.IsNull);
+    CheckTrue(V.Item.Typ = jdtULong);
+    CheckEquals(UInt64(18446744073709551615), V.Item.ULongValue);
+    CheckEquals('18446744073709551615', V.ToJSON());
+  finally
+    V.Free;
+  end;
+
+  V := TJsonBaseObject.ParseUtf8('18446744073709551616') as TJsonPrimitiveValue;
+  try
+    CheckFalse(V.Item.IsNull);
+    CheckTrue(V.Item.Typ = jdtFloat);
+    CheckEquals('1.84467440737096E19', V.ToJSON());
+  finally
+    V.Free;
+  end;
+  V := TJsonBaseObject.Parse('18446744073709551616') as TJsonPrimitiveValue;
+  try
+    CheckFalse(V.Item.IsNull);
+    CheckTrue(V.Item.Typ = jdtFloat);
+    CheckEquals('1.84467440737096E19', V.ToJSON());
+  finally
+    V.Free;
+  end;
 end;
 
 { TestTJsonArray }
