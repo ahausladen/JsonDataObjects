@@ -1983,7 +1983,11 @@ begin
     d := 0.9223372036854775808;
     CheckFalse(V.Item.IsNull);
     CheckTrue(V.Item.Typ = jdtFloat);
+    {$IF declared(jdtBigDecimal)}
+    CheckEquals('0.9223372036854775808', V.ToJSON());
+    {$ELSE}
     CheckEquals('0.922337203685478', V.ToJSON());
+    {$IFEND}
     CheckEquals(FloatToStr(d), FloatToStr(V.Item.FloatValue));
   finally
     V.Free;
@@ -1993,7 +1997,11 @@ begin
     d := 0.9223372036854775808;
     CheckFalse(V.Item.IsNull);
     CheckTrue(V.Item.Typ = jdtFloat);
+    {$IF declared(jdtBigDecimal)}
+    CheckEquals('0.9223372036854775808', V.ToJSON());
+    {$ELSE}
     CheckEquals('0.922337203685478', V.ToJSON());
+    {$IFEND}
     CheckEquals(FloatToStr(d), FloatToStr(V.Item.FloatValue));
   finally
     V.Free;
@@ -2004,7 +2012,11 @@ begin
     d := 0.9223372036854775809;
     CheckFalse(V.Item.IsNull);
     CheckTrue(V.Item.Typ = jdtFloat);
+    {$IF declared(jdtBigDecimal)}
+    CheckEquals('0.9223372036854775809', V.ToJSON());
+    {$ELSE}
     CheckEquals('0.922337203685478', V.ToJSON());
+    {$IFEND}
     CheckEquals(FloatToStr(d), FloatToStr(V.Item.FloatValue));
   finally
     V.Free;
@@ -2014,7 +2026,11 @@ begin
     d := 0.9223372036854775809;
     CheckFalse(V.Item.IsNull);
     CheckTrue(V.Item.Typ = jdtFloat);
+    {$IF declared(jdtBigDecimal)}
+    CheckEquals('0.9223372036854775809', V.ToJSON());
+    {$ELSE}
     CheckEquals('0.922337203685478', V.ToJSON());
+    {$IFEND}
     CheckEquals(FloatToStr(d), FloatToStr(V.Item.FloatValue));
   finally
     V.Free;
@@ -2026,7 +2042,11 @@ begin
     CheckFalse(V.Item.IsNull);
     CheckTrue(V.Item.Typ = jdtFloat);
     CheckEquals(FloatToStr(d), FloatToStr(V.Item.FloatValue));
+    {$IF declared(jdtBigDecimal)}
+    CheckEquals('0.000000000000000000000000000000000000001', V.ToJSON());
+    {$ELSE}
     CheckEquals('1E-39', V.ToJSON());
+    {$IFEND}
   finally
     V.Free;
   end;
@@ -2036,7 +2056,11 @@ begin
     CheckFalse(V.Item.IsNull);
     CheckTrue(V.Item.Typ = jdtFloat);
     CheckEquals(FloatToStr(d), FloatToStr(V.Item.FloatValue));
+    {$IF declared(jdtBigDecimal)}
+    CheckEquals('0.000000000000000000000000000000000000001', V.ToJSON());
+    {$ELSE}
     CheckEquals('1E-39', V.ToJSON());
+    {$IFEND}
   finally
     V.Free;
   end;
@@ -2047,7 +2071,11 @@ begin
     CheckFalse(V.Item.IsNull);
     CheckTrue(V.Item.Typ = jdtFloat);
     CheckEquals(FloatToStr(d), FloatToStr(V.Item.FloatValue));
+    {$IF declared(jdtBigDecimal)}
+    CheckEquals('100000000000000000000000000000000000000.0', V.ToJSON());
+    {$ELSE}
     CheckEquals('1E38', V.ToJSON());
+    {$IFEND}
   finally
     V.Free;
   end;
@@ -2057,24 +2085,11 @@ begin
     CheckFalse(V.Item.IsNull);
     CheckTrue(V.Item.Typ = jdtFloat);
     CheckEquals(FloatToStr(d), FloatToStr(V.Item.FloatValue));
+    {$IF declared(jdtBigDecimal)}
+    CheckEquals('100000000000000000000000000000000000000.0', V.ToJSON());
+    {$ELSE}
     CheckEquals('1E38', V.ToJSON());
-  finally
-    V.Free;
-  end;
-
-  V := TJsonBaseObject.ParseUtf8('0.9223372036854775808') as TJsonPrimitiveValue;
-  try
-    CheckFalse(V.Item.IsNull);
-    CheckTrue(V.Item.Typ = jdtFloat);
-    CheckEquals('0.922337203685478', V.ToJSON());
-  finally
-    V.Free;
-  end;
-  V := TJsonBaseObject.Parse('0.9223372036854775808') as TJsonPrimitiveValue;
-  try
-    CheckFalse(V.Item.IsNull);
-    CheckTrue(V.Item.Typ = jdtFloat);
-    CheckEquals('0.922337203685478', V.ToJSON());
+    {$IFEND}
   finally
     V.Free;
   end;
@@ -2098,11 +2113,17 @@ begin
     V.Free;
   end;
 
+  d := 922337203685477580800.0;
   V := TJsonBaseObject.ParseUtf8('922337203685477580800') as TJsonPrimitiveValue;
   try
     CheckFalse(V.Item.IsNull);
     CheckTrue(V.Item.Typ = jdtFloat);
+    CheckEquals(FloatToStr(d), FloatToStr(V.Item.FloatValue));
+    {$IF declared(jdtBigDecimal)}
+    CheckEquals('922337203685477580800', V.ToJSON());
+    {$ELSE}
     CheckEquals('9.22337203685478E20', V.ToJSON());
+    {$IFEND}
   finally
     V.Free;
   end;
@@ -2110,7 +2131,12 @@ begin
   try
     CheckFalse(V.Item.IsNull);
     CheckTrue(V.Item.Typ = jdtFloat);
+    CheckEquals(FloatToStr(d), FloatToStr(V.Item.FloatValue));
+    {$IF declared(jdtBigDecimal)}
+    CheckEquals('922337203685477580800', V.ToJSON());
+    {$ELSE}
     CheckEquals('9.22337203685478E20', V.ToJSON());
+    {$IFEND}
   finally
     V.Free;
   end;
@@ -2153,11 +2179,17 @@ begin
     V.Free;
   end;
 
+  d := 18446744073709551616.0;
   V := TJsonBaseObject.ParseUtf8('18446744073709551616') as TJsonPrimitiveValue;
   try
     CheckFalse(V.Item.IsNull);
     CheckTrue(V.Item.Typ = jdtFloat);
+    CheckEquals(FloatToStr(d), FloatToStr(V.Item.FloatValue));
+    {$IF declared(jdtBigDecimal)}
+    CheckEquals('18446744073709551616', V.ToJSON());
+    {$ELSE}
     CheckEquals('1.84467440737096E19', V.ToJSON());
+    {$IFEND}
   finally
     V.Free;
   end;
@@ -2165,7 +2197,12 @@ begin
   try
     CheckFalse(V.Item.IsNull);
     CheckTrue(V.Item.Typ = jdtFloat);
+    CheckEquals(FloatToStr(d), FloatToStr(V.Item.FloatValue));
+    {$IF declared(jdtBigDecimal)}
+    CheckEquals('18446744073709551616', V.ToJSON());
+    {$ELSE}
     CheckEquals('1.84467440737096E19', V.ToJSON());
+    {$IFEND}
   finally
     V.Free;
   end;
@@ -2441,7 +2478,10 @@ begin
       {$IF declared(jdtUTF8String)}
       if Typ <> jdtUTF8String then
       {$IFEND}
-        CheckTrue(FoundTypes[Typ], TJsonBaseObject.DataTypeNames[Typ]);
+        {$IF declared(jdtBigDecimal)}
+        if Typ <> jdtBigDecimal then
+        {$IFEND}
+          CheckTrue(FoundTypes[Typ], TJsonBaseObject.DataTypeNames[Typ]);
     end;
   finally
     A.Free;
@@ -3203,7 +3243,10 @@ begin
       {$IF declared(jdtUTF8String)}
       if Typ <> jdtUTF8String then
       {$IFEND}
-        CheckTrue(FoundTypes[Typ], TJsonBaseObject.DataTypeNames[Typ]);
+        {$IF declared(jdtBigDecimal)}
+        if Typ <> jdtBigDecimal then
+        {$IFEND}
+          CheckTrue(FoundTypes[Typ], TJsonBaseObject.DataTypeNames[Typ]);
     end;
   finally
     Obj.Free;
