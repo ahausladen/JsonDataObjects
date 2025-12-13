@@ -180,6 +180,10 @@ type
   PAnsiChar = MarshaledAString;
   {$ENDIF NEXTGEN}
 
+  {$IF not declared(PFormatSettings)}
+  PFormatSettings = ^TFormatSettings;
+  {$IFEND}
+
   EJsonException = class(Exception);
   EJsonCastException = class(EJsonException);
   EJsonPathException = class(EJsonException);
@@ -989,7 +993,7 @@ type
     property DUtc[const Name: string]: TDateTime read GetUtcDateTime write SetUtcDateTime; // returns 0 if property doesn't exist, auto type-cast except for array/object
     property B[const Name: string]: Boolean read GetBool write SetBool;           // returns false if property doesn't exist, auto type-cast with "<>'true'" and "<>0" except for array/object
     property A[const Name: string]: TJsonArray read GetArray write SetArray;      // auto creates array on first access
-    property O[const Name: string]: TJsonObject read GetObj write SetObject;   // auto creates object on first access
+    property O[const Name: string]: TJsonObject read GetObj write SetObject;      // auto creates object on first access
 
     property Path[const NamePath: string]: TJsonDataValueHelper read GetPath write SetPath;
 
@@ -1013,6 +1017,25 @@ var
     EscapeAllNonASCIIChars: False;  // If True all characters >= #128 will be escaped when generating the JSON string
     NullConvertsToValueTypes: False;  // If True and an object is nil/null, a convertion to String, Int, Long, Float, DateTime, Boolean will return ''/0/False
   );
+
+/// <summary>
+/// All StrToFloat and FloatToStr calls that are used to auto-convert values from their internal
+/// type, will use these global JSON-FormatSettings unless a different FormatSettings for the current
+/// thread is configured via SetJsonThreadAutoConvertDoubleStringFormatSettings. If the global
+/// JSON-FormatSettings is set to nil (default), the JSON Storage FormatSettings are used with
+/// DecimalSeparator = '.' <br/>
+/// The function returns the old FormatSettings pointer.<br/>
+/// The caller must guarantee that the FormatSettings pointer stays valid while it is assigned.
+/// </summary>
+function SetJsonGlobalAutoConvertDoubleStringFormatSettings(GlobalFormatSettings: PFormatSettings): PFormatSettings;
+
+/// <summary>
+/// All StrToFloat and FloatToStr calls in the current thread that are used to auto-convert values
+/// from their internal type, will use the thread FormatSettings. If the variable is set to nil,
+/// the global JSON-FormatSettings are used. The function returns the old FormatSettings pointer.<br/>
+/// The caller must guarantee that the FormatSettings pointer stays valid while it is assigned.
+/// </summary>
+function SetJsonThreadAutoConvertDoubleStringFormatSettings(ThreadFormatSettings: PFormatSettings): PFormatSettings;
 
 /// <summary>
 /// Result True if the string is a valid json object or json array
@@ -1313,7 +1336,7 @@ type
   end;
 
 var
-  JSONFormatSettings: TFormatSettings;
+  JSONStorageFormatSettings: TFormatSettings;
   {$IFDEF USE_NAME_STRING_LITERAL}
   JsonMemInfoInitialized: Boolean = False;
   JsonMemInfoBlockStart: PByte = nil;
@@ -1321,6 +1344,11 @@ var
   JsonMemInfoMainBlockStart: PByte = nil;
   JsonMemInfoMainBlockEnd: PByte = nil;
   {$ENDIF USE_NAME_STRING_LITERAL}
+  JsonGlobalAutoConvertDoubleStringFormatSettings: PFormatSettings = nil;
+
+threadvar
+  JsonThreadAutoConvertDoubleStringFormatSettings: PFormatSettings;
+
 
 {$IFDEF MSWINDOWS}
 
@@ -1524,6 +1552,40 @@ end;
 procedure AnsiLowerCamelCaseString(var S: string);
 begin
   S := AnsiLowerCase(PChar(S)^) + Copy(S, 2);
+end;
+
+
+function SetJsonGlobalAutoConvertDoubleStringFormatSettings(GlobalFormatSettings: PFormatSettings): PFormatSettings;
+begin
+  Result := JsonGlobalAutoConvertDoubleStringFormatSettings;
+  JsonGlobalAutoConvertDoubleStringFormatSettings := GlobalFormatSettings;
+end;
+
+function SetJsonThreadAutoConvertDoubleStringFormatSettings(ThreadFormatSettings: PFormatSettings): PFormatSettings;
+begin
+  Result := JsonThreadAutoConvertDoubleStringFormatSettings;
+  JsonThreadAutoConvertDoubleStringFormatSettings := ThreadFormatSettings;
+end;
+
+function GetConvertFormatSettings: PFormatSettings;
+begin
+  Result := Pointer(JsonThreadAutoConvertDoubleStringFormatSettings);
+  if Result = nil then
+  begin
+    Result := Pointer(JsonGlobalAutoConvertDoubleStringFormatSettings);
+    if Result = nil then
+      Result := @JSONStorageFormatSettings; // old behavior
+  end;
+end;
+
+function ConvertFloatToStr(Value: Double): string; inline;
+begin
+  Result := FloatToStr(Value, GetConvertFormatSettings()^);
+end;
+
+function ConvertStrToFloat(const Value: string): Double; inline;
+begin
+  Result := StrToFloat(Value, GetConvertFormatSettings()^);
 end;
 
 {$IF not declared(TryStrToUInt64)}
@@ -2657,7 +2719,7 @@ begin
     jdtULong:
       Result := UIntToStr(FValue.U);
     jdtFloat:
-      Result := FloatToStr(FValue.F, JSONFormatSettings);
+      Result := ConvertFloatToStr(FValue.F);
     jdtDateTime:
       Result := TJsonBaseObject.DateTimeToJSON(FValue.F, JsonSerializationConfig.UseUtcTime);
     jdtUtcDateTime:
@@ -2788,13 +2850,13 @@ begin
       Result := 0;
     jdtString:
       if not TryStrToInt(string(FValue.S), Result) then
-        Result := Trunc(StrToFloat(string(FValue.S), JSONFormatSettings));
+        Result := Trunc(ConvertStrToFloat(string(FValue.S)));
     {$IFDEF USE_UTF8STRING_VALUES}
     jdtUTF8String:
       begin
         ConvertUTF8ToStringType;
         if not TryStrToInt(string(FValue.S), Result) then
-          Result := Trunc(StrToFloat(string(FValue.S), JSONFormatSettings));
+          Result := Trunc(ConvertStrToFloat(string(FValue.S)));
       end;
     {$ENDIF USE_UTF8STRING_VALUES}
     jdtInt:
@@ -2842,13 +2904,13 @@ begin
       Result := 0;
     jdtString:
       if not TryStrToInt64(string(FValue.S), Result) then
-        Result := Trunc(StrToFloat(string(FValue.S), JSONFormatSettings));
+        Result := Trunc(ConvertStrToFloat(string(FValue.S)));
     {$IFDEF USE_UTF8STRING_VALUES}
     jdtUTF8String:
       begin
         ConvertUTF8ToStringType;
         if not TryStrToInt64(string(FValue.S), Result) then
-          Result := Trunc(StrToFloat(string(FValue.S), JSONFormatSettings));
+          Result := Trunc(ConvertStrToFloat(string(FValue.S)));
       end;
     {$ENDIF USE_UTF8STRING_VALUES}
     jdtInt:
@@ -2896,13 +2958,13 @@ begin
       Result := 0;
     jdtString:
       if not TryStrToUInt64(string(FValue.S), Result) then
-        Result := Trunc(StrToFloat(string(FValue.S), JSONFormatSettings));
+        Result := Trunc(ConvertStrToFloat(string(FValue.S)));
     {$IFDEF USE_UTF8STRING_VALUES}
     jdtUTF8String:
       begin
         ConvertUTF8ToStringType;
         if not TryStrToUInt64(string(FValue.S), Result) then
-          Result := Trunc(StrToFloat(string(FValue.S), JSONFormatSettings));
+          Result := Trunc(ConvertStrToFloat(string(FValue.S)));
       end;
     {$ENDIF USE_UTF8STRING_VALUES}
     jdtInt:
@@ -2949,12 +3011,12 @@ begin
     jdtNone:
       Result := 0;
     jdtString:
-      Result := StrToFloat(string(FValue.S), JSONFormatSettings);
+      Result := ConvertStrToFloat(string(FValue.S));
     {$IFDEF USE_UTF8STRING_VALUES}
     jdtUTF8String:
       begin
         ConvertUTF8ToStringType;
-        Result := StrToFloat(string(FValue.S), JSONFormatSettings);
+        Result := ConvertStrToFloat(string(FValue.S));
       end;
     {$ENDIF USE_UTF8STRING_VALUES}
     jdtInt:
@@ -3173,7 +3235,7 @@ begin
   end;
 end;
 
-function DoubleToText(Buffer: PChar; const Value: Extended): Integer; {inline;}
+function DoubleToText(Buffer: PChar; const Value: Extended): Integer;
 var
   I: Integer;
   {$IFDEF FPC}
@@ -3181,11 +3243,11 @@ var
   {$ENDIF FPC}
 begin
   {$IFDEF FPC}
-  Result := FloatToText(AnsiBuf, Value, ffGeneral, 15, 0, JSONFormatSettings);
+  Result := FloatToText(AnsiBuf, Value, ffGeneral, 15, 0, JSONStorageFormatSettings);
   for I := 0 to Result - 1 do
     Buffer[I] := WideChar(Ord(AnsiBuf[I])); // we only have digits and -, +, ., E as characters
   {$ELSE}
-  Result := FloatToText(Buffer, Value, fvExtended, ffGeneral, 15, 0, JSONFormatSettings);
+  Result := FloatToText(Buffer, Value, fvExtended, ffGeneral, 15, 0, JSONStorageFormatSettings);
   {$ENDIF FPC}
 
   // Add the decimal separator if FloatToText didn't add it, so that the data type of
@@ -8168,7 +8230,7 @@ begin
       jdtULong:
         Result := UIntToStr(Value.FData.FULongValue);
       jdtFloat:
-        Result := FloatToStr(Value.FData.FFloatValue, JSONFormatSettings);
+        Result := ConvertFloatToStr(Value.FData.FFloatValue);
       jdtDateTime:
         Result := TJsonBaseObject.DateTimeToJSON(Value.FData.FDateTimeValue, JsonSerializationConfig.UseUtcTime);
       jdtUtcDateTime:
@@ -8364,12 +8426,12 @@ begin
   else
     case Value.FData.FTyp of
       jdtString:
-        Result := StrToFloat(Value.FData.FValue, JSONFormatSettings);
+        Result := ConvertStrToFloat(Value.FData.FValue);
       {$IFDEF USE_UTF8STRING_VALUES}
       jdtUTF8String:
         begin
           Value.ConvertUTF8ToStringType;
-          Result := StrToFloat(Value.FData.FValue, JSONFormatSettings);
+          Result := ConvertStrToFloat(Value.FData.FValue);
         end;
       {$ENDIF USE_UTF8STRING_VALUES}
       jdtInt:
@@ -8411,12 +8473,12 @@ begin
   else
     case Value.FData.FTyp of
       jdtString:
-        Result := StrToFloat(Value.FData.FValue, JSONFormatSettings);
+        Result := ConvertStrToFloat(Value.FData.FValue);
       {$IFDEF USE_UTF8STRING_VALUES}
       jdtUTF8String:
         begin
           Value.ConvertUTF8ToStringType;
-          Result := StrToFloat(Value.FData.FValue, JSONFormatSettings);
+          Result := ConvertStrToFloat(Value.FData.FValue);
         end;
       {$ENDIF USE_UTF8STRING_VALUES}
       jdtInt:
@@ -9598,6 +9660,7 @@ initialization
   // create a new string.
   UniqueString(sTrue);
   UniqueString(sFalse);
-  JSONFormatSettings.DecimalSeparator := '.';
+  JSONStorageFormatSettings.ThousandSeparator := ',';
+  JSONStorageFormatSettings.DecimalSeparator := '.';
 
 end.

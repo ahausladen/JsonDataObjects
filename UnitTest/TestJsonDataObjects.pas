@@ -3211,6 +3211,7 @@ begin
 end;
 
 initialization
+  SetJsonGlobalAutoConvertDoubleStringFormatSettings(nil);
   RegisterTest(TestTJsonBaseObject.Suite);
   RegisterTest(TestTJsonArray.Suite);
   RegisterTest(TestTJsonObject.Suite);
