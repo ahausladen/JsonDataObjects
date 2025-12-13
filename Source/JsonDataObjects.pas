@@ -92,17 +92,17 @@ unit JsonDataObjects;
 {--------------------------------------------------------------------------------------------------}
 
 {$IFDEF SUPPORTS_UTF8STRING}
-  // Enables internal UTF8 values for values written via UTF8[], ValueUTF8 or loaded by the UTF8-Parser.
-  // Alle keys will remain UnicodeStrings. The UTF8 values will automatically by converted to
-  // UnicodeStrings if accessed by anything other than UTF8[], ValueUTF8. The internal UTF8 value
+  // Enables internal UTF8 values for values set via UTF8[], ValueUTF8 or loaded by the UTF8-Parser.
+  // Alle keys remain UnicodeStrings. The UTF8 values will automatically by converted to
+  // UnicodeStrings if accessed by anything other than UTF8[] or ValueUTF8. The internal UTF8 value
   // is then replaced by the UnicodeString. The JSON-Writer (UTF8 and UTF16) also converts all
   // internal UTF8 values to UnicodeString.
-  // So this only helps to save memory if the JSON is loaded, accessed via UTF8[], ValueUTF8 and never
-  // written.
+  // So this only helps to save memory if the JSON is loaded, accessed via UTF8[] or ValueUTF8 and
+  // never written.
   {.$DEFINE USE_UTF8STRING_VALUES}
 {$ENDIF SUPPORTS_UTF8STRING}
 
-// Sanity checks all array index accesses and raise an EListError exception.
+// Sanity checks all array index accesses and raises an EListError exception.
 {$DEFINE CHECK_ARRAY_INDEX}
 
 // If defined the JSON parser is more strict to what is allowed and what not.
@@ -113,7 +113,7 @@ unit JsonDataObjects;
 // enables the special handling for "</" but makes the parser slightly slower.
 {.$DEFINE ESCAPE_SLASH_AFTER_LESSTHAN}
 
-// When parsing a JSON string the pair names are interned to reduce the memory foot print. This
+// When parsing a JSON string the property names are interned to reduce the memory foot print. This
 // slightly slows down the parser but saves a lot of memory if the JSON string contains repeating
 // pair names. The interning uses a hashset to store the strings.
 {$DEFINE USE_STRINGINTERN_FOR_NAMES}
@@ -136,7 +136,7 @@ unit JsonDataObjects;
 {$IFDEF MSWINDOWS}
   // When adding JSON object properties with string literals, the string literals are stored directly
   // in the "Name" field instead of using UStrAsg what creates a new heap string. This improves the
-  // performance as no string is copied and it slighly reduces the memory usage.
+  // performance because no string is copied and it slighly reduces the memory usage.
   // The string literals are only used if they are in the main instance or the DLL that contains the
   // JsonDataObjects unit. Other string literals are copied using UStrAsg because unloading the DLL
   // that holds them would cause access violations.
