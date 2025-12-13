@@ -1106,6 +1106,10 @@ const
     1/1E10, 1/1E11, 1/1E12, 1/1E13, 1/1E14, 1/1E15, 1/1E16, 1/1E17, 1/1E18
   );
 
+  {$IFDEF CPUX86}
+  Single2ToThePowerOf64: Single = 1.84467440737096E+19; // used for UInt64->Double conversion
+  {$ENDIF CPUX86}
+
   // XE7 broke string literal collapsing
 var
   sTrue: string = 'true';
@@ -1119,6 +1123,12 @@ const
   {$IFEND}
 
 type
+  {$IFDEF CPUX86}
+  TInt64HiLo = record
+    Lo, Hi: Integer;
+  end;
+  {$ENDIF CPUX86}
+
   {$IFDEF FPC}
   PStrRec = ^TStrRec;
   TStrRec = record
@@ -2952,7 +2962,14 @@ begin
     jdtLong:
       Result := FValue.L;
     jdtULong:
+      {$IFDEF CPUX86} // faster and works around an x86 on ARM Prism Emulation bug
+      if TInt64HiLo(FValue.U).Hi and $80000000 = 0 then
+        Result := FValue.I
+      else
+        Result := FValue.I + Single2ToThePowerOf64;
+      {$ELSE}
       Result := FValue.U;
+      {$ENDIF CPUX86}
     jdtFloat:
       Result := FValue.F;
     jdtDateTime, jdtUtcDateTime:
@@ -3004,7 +3021,14 @@ begin
     jdtLong:
       Result := FValue.L;
     jdtULong:
+      {$IFDEF CPUX86} // faster and works around an x86 on ARM Prism Emulation bug
+      if TInt64HiLo(FValue.U).Hi and $80000000 = 0 then
+        Result := FValue.I
+      else
+        Result := FValue.I + Single2ToThePowerOf64;
+      {$ELSE}
       Result := FValue.U;
+      {$ENDIF CPUX86}
     jdtFloat:
       Result := FValue.F;
     jdtDateTime:
@@ -3058,7 +3082,14 @@ begin
     jdtLong:
       Result := FValue.L;
     jdtULong:
+      {$IFDEF CPUX86} // faster and works around an x86 on ARM Prism Emulation bug
+      if TInt64HiLo(FValue.U).Hi and $80000000 = 0 then
+        Result := FValue.I
+      else
+        Result := FValue.I + Single2ToThePowerOf64;
+      {$ELSE}
       Result := FValue.U;
+      {$ENDIF CPUX86}
     jdtFloat:
       Result := FValue.F;
     jdtDateTime:
@@ -7330,7 +7361,14 @@ begin
           Exit;
         end;
       end;
+      {$IFDEF CPUX86} // faster and works around an x86 on ARM Prism Emulation bug
+      if TInt64HiLo(FLook.U).Hi and $80000000 = 0 then
+        Value := FLook.I
+      else
+        Value := FLook.I + Single2ToThePowerOf64;
+      {$ELSE}
       Value := FLook.U;
+      {$ENDIF CPUX86}
     end;
   end
   else
@@ -7357,11 +7395,11 @@ begin
     if DigitCount + (P - F) <= 18 then
     begin
       F := F - DigitCount;
-      FractionValue := ParseUInt64Utf8(F, P) * ReciprocalPower10[P - F];
+      FractionValue := Int64(ParseUInt64Utf8(F, P)) * ReciprocalPower10[P - F]; // UInt64->Int64: faster and works around an x86 on ARM Prism Emulation bug
     end
     else
     begin
-      FractionValue := ParseUInt64Utf8(F, P) * ReciprocalPower10[P - F];
+      FractionValue := Int64(ParseUInt64Utf8(F, P)) * ReciprocalPower10[P - F]; // UInt64->Int64: faster and works around an x86 on ARM Prism Emulation bug
       if DigitCount > 0 then
       begin
         Scale := 1;
@@ -7897,7 +7935,14 @@ begin
           Exit;
         end;
       end;
+      {$IFDEF CPUX86} // faster and works around an x86 on ARM Prism Emulation bug
+      if TInt64HiLo(FLook.U).Hi and $80000000 = 0 then
+        Value := FLook.I
+      else
+        Value := FLook.I + Single2ToThePowerOf64;
+      {$ELSE}
       Value := FLook.U;
+      {$ENDIF CPUX86}
     end;
   end
   else
@@ -7924,11 +7969,11 @@ begin
     if DigitCount + (P - F) <= 18 then
     begin
       F := F - DigitCount;
-      FractionValue := ParseUInt64(F, P) * ReciprocalPower10[P - F];
+      FractionValue := Int64(ParseUInt64(F, P)) * ReciprocalPower10[P - F]; // UInt64->Int64: faster and works around an x86 on ARM Prism Emulation bug
     end
     else
     begin
-      FractionValue := ParseUInt64(F, P) * ReciprocalPower10[P - F];
+      FractionValue := Int64(ParseUInt64(F, P)) * ReciprocalPower10[P - F]; // UInt64->Int64: faster and works around an x86 on ARM Prism Emulation bug
       if DigitCount > 0 then
       begin
         Scale := 1;
@@ -8332,7 +8377,14 @@ begin
       jdtLong:
         Result := Value.FData.FLongValue;
       jdtULong:
+        {$IFDEF CPUX86} // faster and works around an x86 on ARM Prism Emulation bug
+        if TInt64HiLo(Value.FData.FULongValue).Hi and $80000000 = 0 then
+          Result := Value.FData.FLongValue
+        else
+          Result := Value.FData.FLongValue + Single2ToThePowerOf64;
+        {$ELSE}
         Result := Value.FData.FULongValue;
+        {$ENDIF CPUX86}
       jdtFloat:
         Result := Value.FData.FFloatValue;
       jdtDateTime, jdtUtcDateTime:
@@ -8372,7 +8424,14 @@ begin
       jdtLong:
         Result := Value.FData.FLongValue;
       jdtULong:
+        {$IFDEF CPUX86} // faster and works around an x86 on ARM Prism Emulation bug
+        if TInt64HiLo(Value.FData.FULongValue).Hi and $80000000 = 0 then
+          Result := Value.FData.FLongValue
+        else
+          Result := Value.FData.FLongValue + Single2ToThePowerOf64;
+        {$ELSE}
         Result := Value.FData.FULongValue;
+        {$ENDIF CPUX86}
       jdtFloat:
         Result := Value.FData.FFloatValue;
       jdtDateTime, jdtUtcDateTime:
@@ -8412,7 +8471,14 @@ begin
       jdtLong:
         Result := Value.FData.FLongValue;
       jdtULong:
+        {$IFDEF CPUX86} // faster and works around an x86 on ARM Prism Emulation bug
+        if TInt64HiLo(Value.FData.FULongValue).Hi and $80000000 = 0 then
+          Result := Value.FData.FLongValue
+        else
+          Result := Value.FData.FLongValue + Single2ToThePowerOf64;
+        {$ELSE}
         Result := Value.FData.FULongValue;
+        {$ENDIF CPUX86}
       jdtFloat:
         Result := Value.FData.FFloatValue;
       jdtDateTime:
@@ -8744,7 +8810,14 @@ begin
       jdtLong:
         Result := FData.FLongValue;
       jdtULong:
+        {$IFDEF CPUX86} // faster and works around an x86 on ARM Prism Emulation bug
+        if TInt64HiLo(FData.FULongValue).Hi and $80000000 = 0 then
+          Result := FData.FLongValue
+        else
+          Result := FData.FLongValue + Single2ToThePowerOf64;
+        {$ELSE}
         Result := FData.FULongValue;
+        {$ENDIF CPUX86}
       jdtFloat:
         Result := FData.FFloatValue;
       jdtDateTime:
