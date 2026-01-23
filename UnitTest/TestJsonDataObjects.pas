@@ -1290,6 +1290,11 @@ begin
     Dt := TJsonBaseObject.JSONToDateTime('2025-11-28T04:57:30.4115+00:00');
     CheckEquals(ExpectDt, Dt, 'expected datetime: ' + FormatDateTime('yyyy-mm-dd hh:mm:ss.zzz', ExpectDt) + ', returned: ' + FormatDateTime('yyyy-mm-dd hh:mm:ss.zzz', Dt));
 
+  // Use of sub-milliseconds but limit to 999ms
+  ExpectDt := UtcDateTimeToLocalDateTime(EncodeDate(2026, 1, 23) + EncodeTime(9, 44, 9, 999));
+    Dt := TJsonBaseObject.JSONToDateTime('2026-01-23T09:44:09.999912+00:00');
+    CheckEquals(ExpectDt, Dt, 'expected datetime: ' + FormatDateTime('yyyy-mm-dd hh:mm:ss.zzz', ExpectDt) + ', returned: ' + FormatDateTime('yyyy-mm-dd hh:mm:ss.zzz', Dt));
+
   // Use of sub-milliseconds
   ExpectDt := UtcDateTimeToLocalDateTime(EncodeDate(2025, 11, 28) + EncodeTime(4, 57, 30, 411));
     Dt := TJsonBaseObject.JSONToDateTime('2025-11-28T04:57:30.4114+00:00');
