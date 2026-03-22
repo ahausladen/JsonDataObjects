@@ -1257,7 +1257,7 @@ type
   {$ENDIF USE_UTF8STRING_VALUES}
   public
     Kind: TJsonTokenKind;
-    S: string; // jtkIdent/jtkString
+    S: string; // jtkIdent/jtkString/BigDecimal
     case Integer of
       0: (I: Integer; HI: Integer);
       1: (L: Int64);
@@ -1943,14 +1943,14 @@ var
   FS: PFormatSettings;
 begin
   Result := AValue;
-  // BigDecimal has a '.' as Decimal separator. But if we want to convert it to a string, so we
+  // BigDecimal has a '.' as Decimal separator. But if we want to convert it to a string, we
   // need to follow the rules as if we would do a ConvertFloatToStr(value).
   FS := GetConvertFormatSettings;
   if FS.DecimalSeparator <> '.' then
   begin
     Ps := Pos('.', AValue);
     if Ps > 0 then
-      Result[Ps] := FormatSettings.DecimalSeparator;
+      Result[Ps] := FS.DecimalSeparator;
   end;
 end;
 
@@ -5546,7 +5546,7 @@ begin
         QuickSortNames(0, FCount - 1);
       end;
     end;
-    FFirstUnsortedNameIndex := -1; // reset so that we don't recurve in InternAddSortedName
+    FFirstUnsortedNameIndex := -1; // reset so that we don't recursive in InternAddSortedName
   end;
 end;
 
@@ -9967,8 +9967,8 @@ initialization
     TzSpecificLocalTimeToSystemTime := TzSpecificLocalTimeToSystemTimeWin2000;
     {$ENDIF SUPPORT_WINDOWS2000}
   {$ENDIF MSWINDOWS}
-  // Make sTrue and sFalse a mutable string (RefCount<>-1) so that UStrAsg doesn't always
-  // create a new string.
+  // Make sTrue and sFalse a mutable string (RefCount<>-1) so that UStrAsg doesn't create
+  // a new string everytime it is invoked.
   UniqueString(sTrue);
   UniqueString(sFalse);
   JSONStorageFormatSettings.ThousandSeparator := ',';
