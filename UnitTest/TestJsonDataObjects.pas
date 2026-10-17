@@ -78,6 +78,7 @@ type
     procedure TestVariant;
     procedure TestVariantNull;
     procedure TestUInt64;
+    procedure TestUInt64ToFloat;
     procedure TestProgress;
     procedure TestToJsonSerializationConfig;
     procedure TestSyntaxErrors;
@@ -1803,6 +1804,26 @@ begin
   try
     S2 := Json.ToJSON;
     CheckEquals(S1, S2, 'UInt64 mismatch');
+  finally
+    Json.Free;
+  end;
+end;
+
+procedure TestTJsonBaseObject.TestUInt64ToFloat;
+const
+  Delta = 1E5; // the spacing of a Double near 1E19 is 2048
+var
+  Json: TJsonObject;
+begin
+  // Numbers that do not fit an Int64 are read as UInt64 or, when negative, as Double.
+  // On 32-bit targets that conversion used the low 32 bits of the value only.
+  Json := TJsonObject.Parse('{"umax":18446744073709551615,"ubig":9223372036854775808,' +
+                            '"min":-9223372036854775808,"neg":-9300000000000000000}') as TJsonObject;
+  try
+    CheckEquals(1.8446744073709552E19, Json['umax'].FloatValue, Delta, 'UInt64 max as Double');
+    CheckEquals(9.223372036854775808E18, Json['ubig'].FloatValue, Delta, '2^63 as Double');
+    CheckEquals(-9.223372036854775808E18, Json['min'].FloatValue, Delta, 'Int64 min as Double');
+    CheckEquals(-9.3E18, Json['neg'].FloatValue, Delta, 'negative below Int64 min as Double');
   finally
     Json.Free;
   end;
