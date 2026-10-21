@@ -5981,7 +5981,8 @@ begin
 
   Result := Length(P1^) - Length(P2^);
   if Result = 0 then
-    Result := CompareStr(P1^, P2^);
+    //Result := CompareStr(P1^, P2^);
+    Result := CompareText(P1^, P2^);
 end;
 
 procedure TJsonObject.QuickSortNames(L, R: Integer);
@@ -6049,7 +6050,8 @@ begin
     I := (Result + H) shr 1;
     C := Length(FNames[FSortedNames[I]]) - NameLen;
     if C = 0 then
-      C := CompareStr(FNames[FSortedNames[I]], Name);
+      C := CompareText(FNames[FSortedNames[I]], Name);
+      //C := CompareStr(FNames[FSortedNames[I]], Name);
     if C < 0 then
       Result := I + 1
     else
@@ -6081,7 +6083,8 @@ begin
     I := (Result + H) shr 1;
     C := Length(FNames[FSortedNames[I]]) - NameLen;
     if C = 0 then
-      C := CompareStr(FNames[FSortedNames[I]], FNames[NameIndex]);
+      //C := CompareStr(FNames[FSortedNames[I]], FNames[NameIndex]);
+      C := CompareText(FNames[FSortedNames[I]], FNames[NameIndex]);
     if C < 0 then
       Result := I + 1
     else
