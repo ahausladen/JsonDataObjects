@@ -61,6 +61,7 @@ UnitTest/*.res
 *.projdata
 *.tvsconfig
 *.dsk
+*.dsv
 
 # Delphi history and backups
 __history/
@@ -69,3 +70,7 @@ __recovery/
 
 # Castalia statistics file (since XE7 Castalia is distributed with Delphi)
 *.stat
+
+# Lazarus backups and compiler-generated binaries (safe to delete)
+backup/
+lcu/

@@ -43,7 +43,12 @@ unit JsonDataObjects;
 {--------------------------------------------------------------------------------------------------}
 {$IFDEF FPC}
   {$DEFINE SUPPORTS_UTF8STRING}
+  {$IFDEF FPC_HAS_TYPE_EXTENDED}
+    {$DEFINE EXTENDED_OVERLOADS} // Separate overloads for Double and Extended
+  {$ENDIF}
 {$ELSE}
+  {$DEFINE EXTENDED_OVERLOADS} // Separate overloads for Double and Extended
+
   {$IFDEF VER200}
     // Delphi 2009's ErrorInsight parser uses the CompilerVersion's memory address instead of 20.0, failing all the
     // IF CompilerVersion compiler directives
@@ -141,6 +146,12 @@ unit JsonDataObjects;
 // the CPU locks for those string assignments.
 {$DEFINE USE_FAST_STRASG_FOR_INTERNAL_STRINGS}
 
+// Disables automatic inclusion of cwstring on FPC Unix platforms.
+// By default, cwstring installs an application-wide Unicode/WideString manager
+// backed by the system C library. Define NO_CWSTRING if the application installs
+// its own manager, such as fpwidestring. Without a suitable manager, some string
+// conversions and Variant string comparisons may raise ENoWideStringSupport.
+{.$DEFINE NO_CWSTRING}
 
 {$IFDEF MSWINDOWS}
   // When adding JSON object properties with string literals, the string literals are stored directly
@@ -170,6 +181,13 @@ unit JsonDataObjects;
 interface
 
 uses
+  {$IFDEF FPC}
+    {$IFDEF UNIX}
+      {$IFNDEF NO_CWSTRING}
+      cwstring,
+      {$ENDIF}
+    {$ENDIF}
+  {$ENDIF}
   {$IFDEF HAS_UNIT_SCOPE}
   System.SysUtils, System.Classes;
   {$ELSE}
@@ -529,10 +547,10 @@ type
     //class operator Implicit(const Value: TJsonDataValueHelper): UInt64; overload;  conflicts with Int64 operator
     class operator Implicit(const Value: Double): TJsonDataValueHelper; overload;
     class operator Implicit(const Value: TJsonDataValueHelper): Double; overload;
-    {$IFNDEF FPC}
+    {$IFDEF EXTENDED_OVERLOADS}
     class operator Implicit(const Value: Extended): TJsonDataValueHelper; overload;
     class operator Implicit(const Value: TJsonDataValueHelper): Extended; overload;
-    {$ENDIF ~FPC}
+    {$ENDIF EXTENDED_OVERLOADS}
     class operator Implicit(const Value: TDateTime): TJsonDataValueHelper; overload;
     class operator Implicit(const Value: TJsonDataValueHelper): TDateTime; overload;
     class operator Implicit(const Value: Boolean): TJsonDataValueHelper; overload;
@@ -2139,6 +2157,18 @@ begin
     raise EJsonParserException.CreateResFmt(@RsInvalidHexNumber, [P^], Reader.FLineNum, Reader.GetLineColumn, Reader.GetPosition);
 end;
 
+function NormalizeDateTimeMilliseconds(const Value: TDateTime): TDateTime;
+var
+  ST: TSystemTime;
+begin
+  // Reconstructs a TDateTime from calendar fields with millisecond precision,
+  // removing sub-millisecond rounding errors introduced by floating-point
+  // date/time arithmetic, such as time-zone adjustments. This gives equivalent
+  // timestamps a consistent representation for exact comparisons.
+  DateTimeToSystemTime(Value, ST);
+  Result := SystemTimeToDateTime(ST);
+end;
+
 function UtcDateTimeToLocalDateTime(UtcDateTime: TDateTime): TDateTime;
 {$IFDEF MSWINDOWS}
 var
@@ -2157,6 +2187,7 @@ begin
   {$ELSE}
   Result := TTimeZone.Local.ToLocalTime(UtcDateTime);
   {$ENDIF FPC}
+  Result := NormalizeDateTimeMilliseconds(Result);
 end;
 {$ENDIF MSWINDOWS}
 
@@ -2178,6 +2209,7 @@ begin
   {$ELSE}
   Result := TTimeZone.Local.ToUniversalTime(DateTime);
   {$ENDIF FPC}
+  Result := NormalizeDateTimeMilliseconds(Result);
 end;
 {$ENDIF MSWINDOWS}
 
@@ -4300,9 +4332,12 @@ begin
     end;
     if (P[0] = ')') and (P[1] = '/') and (P[2] = #0) then
     begin
+      // Floating-point addition may introduce sub-millisecond rounding errors
       Result := UnixDateDelta + (MSecsSince1970 / MSecsPerDay);
       if ConvertToLocalTime then
-        Result := UtcDateTimeToLocalDateTime(Result);
+        Result := UtcDateTimeToLocalDateTime(Result)
+      else
+        Result := NormalizeDateTimeMilliseconds(Result);
     end
     else
       Result := 0; // invalid format
@@ -4354,7 +4389,8 @@ begin
             Inc(P);
           ParseDateTimePart(P, OffsetMin, 2);
 
-          Result := Result + (EncodeTime(OffsetHour, OffsetMin, 0, 0) * Sign);
+          // Floating-point addition may introduce sub-millisecond rounding errors
+          Result := Result + (EncodeTime(OffsetHour, OffsetMin, 0, 0) * Double(Sign));
         end
         else
         begin
@@ -4364,7 +4400,9 @@ begin
       end;
 
       if ConvertToLocalTime then
-        Result := UtcDateTimeToLocalDateTime(Result);
+        Result := UtcDateTimeToLocalDateTime(Result)
+      else
+        Result := NormalizeDateTimeMilliseconds(Result);
     end;
   end;
 end;
@@ -6674,6 +6712,7 @@ begin
               tkInteger, tkChar, tkWChar:
                 SetOrdProp(AObject, PropList[Index], Item.IntValue);
 
+              {$IFDEF FPC} tkBool, {$ENDIF}
               tkEnumeration:
                 SetOrdProp(AObject, PropList[Index], Item.IntValue);
 
@@ -6780,6 +6819,7 @@ begin
             tkInteger, tkChar, tkWChar:
               InternAdd(PropName, GetOrdProp(AObject, PropList[Index]));
 
+            {$IFDEF FPC} tkBool, {$ENDIF}
             tkEnumeration:
               begin
                 PropType := PropList[Index].PropType{$IFNDEF FPC}^{$ENDIF};
@@ -9641,7 +9681,7 @@ begin
     end;
 end;
 
-{$IFNDEF FPC}
+{$IFDEF EXTENDED_OVERLOADS}
 class operator TJsonDataValueHelper.Implicit(const Value: Extended): TJsonDataValueHelper;  // same as double
 begin
   Result.InternClear(iscNone);
@@ -9691,7 +9731,7 @@ begin
       Result := 0;
     end;
 end;
-{$ENDIF ~FPC}
+{$ENDIF EXTENDED_OVERLOADS}
 
 class operator TJsonDataValueHelper.Implicit(const Value: TDateTime): TJsonDataValueHelper;
 begin
