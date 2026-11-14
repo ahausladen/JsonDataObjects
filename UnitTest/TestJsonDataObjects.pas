@@ -1,5 +1,10 @@
 unit TestJsonDataObjects;
 
+{$IFDEF FPC}
+  {$mode DelphiUnicode}
+  {$MINFPCONSTPREC 64}
+{$ENDIF}
+
 {$IFDEF NEXTGEN}
   {$IF CompilerVersion >= 31.0} // 10.1 Berlin or newer
     {$DEFINE SUPPORTS_UTF8STRING} // Delphi 10.1 Berlin supports UTF8String for mobile compilers
@@ -8,11 +13,28 @@ unit TestJsonDataObjects;
   {$DEFINE SUPPORTS_UTF8STRING}
 {$ENDIF}
 
+{$IFNDEF FPC}
+  {$IFDEF UNICODE}
+    {$DEFINE SUPPORTS_UNICODE_IDENTIFIERS}
+  {$ENDIF}
+{$ENDIF}
+
 interface
 
 uses
+{$IFDEF FPC}
+  SysUtils, Classes, Variants,
+  {$IFDEF MSWINDOWS}
+    Windows,
+  {$ELSE}
+    DateUtils,
+  {$ENDIF}
+  fpcunit, testregistry,
+{$ELSE}
   Winapi.Windows, System.SysUtils, System.Classes, System.Variants,
-  TestFramework, JsonDataObjects;
+  TestFramework,
+{$ENDIF}
+  JsonDataObjects;
 
 type
   TestTJsonBaseObject = class(TTestCase)
@@ -143,6 +165,20 @@ type
 
 implementation
 
+{$IFDEF FPC}
+// FPCUnit does not provide these DUnit assertion helpers.
+procedure CheckEqualsString(const Expected, Actual: string; const Msg: AnsiString = '');
+begin
+  TAssert.CheckEquals(Expected, Actual, Msg);
+end;
+
+procedure CheckEqualsMem(Expected, Actual: Pointer; Size: NativeInt;
+  const Msg: AnsiString = 'Memory contents differ');
+begin
+  TAssert.Check(CompareMem(Expected, Actual, Size), Msg);
+end;
+{$ENDIF}
+
 function CompareFloatRel(Expected, Actual: Extended; RelativeError: Extended = 0.0000001): Boolean;
 begin
   Result := (Expected = Actual) or (Abs((Actual - Expected) / Expected) < RelativeError);
@@ -182,10 +218,10 @@ end;
 
 procedure TestTJsonBaseObject.TestParseUtf8Empty;
 begin
-  Check(TJsonBaseObject.ParseUtf8('') = nil, '1: nil expected');
+  Check(TJsonBaseObject.ParseUtf8(PAnsiChar('')) = nil, '1: nil expected');
   Check(TJsonBaseObject.ParseUtf8('', 0) = nil, '2: nil expected');
   Check(TJsonBaseObject.ParseUtf8('', -1) = nil, '3: nil expected');
-  Check(TJsonBaseObject.ParseUtf8(' ') = nil, '4: nil expected');
+  Check(TJsonBaseObject.ParseUtf8(PAnsiChar(' ')) = nil, '4: nil expected');
   Check(TJsonBaseObject.ParseUtf8(' ', 0) = nil, '5: nil expected');
   Check(TJsonBaseObject.ParseUtf8(' ', 1) = nil, '6: nil expected');
   Check(TJsonBaseObject.ParseUtf8(nil, -1) = nil, '7: nil expected');
@@ -1121,7 +1157,7 @@ end;
 
 procedure TestTJsonBaseObject.ParseUtf8BrokenJSON1;
 begin
-  TJsonBaseObject.ParseUtf8('{').Free;
+  TJsonBaseObject.ParseUtf8(PAnsiChar('{')).Free;
 end;
 
 procedure TestTJsonBaseObject.ParseUtf8BrokenJSON2;
@@ -1332,22 +1368,10 @@ begin
 end;
 
 function UtcDateTimeToLocalDateTime(UtcDateTime: TDateTime): TDateTime;
-{$IFDEF MSWINDOWS}
-var
-  UtcTime, LocalTime: TSystemTime;
 begin
-  DateTimeToSystemTime(UtcDateTime, UtcTime);
-  if SystemTimeToTzSpecificLocalTime(nil, UtcTime, LocalTime) then
-    Result := SystemTimeToDateTime(LocalTime)
-  else
-    Result := UtcDateTime;
+  Result := TJsonBaseObject.JSONToDateTime(
+    TJsonBaseObject.UtcDateTimeToJSON(UtcDateTime));
 end;
-{$ELSE}
-begin
-  Result := TTimeZone.Local.ToLocalTime(UtcDateTime);
-end;
-{$ENDIF MSWINDOWS}
-
 
 procedure TestTJsonBaseObject.TestDateTimeToJSON;
 var
@@ -1389,6 +1413,12 @@ begin
     S := TJsonBaseObject.DateTimeToJSON(ExpectDt, True);
     Dt := TJsonBaseObject.JSONToDateTime(S);
     CheckEquals(ExpectDt, Dt, 'expected datetime: ' + DateTimeToStr(ExpectDt) + ', returned: ' + DateTimeToStr(Dt));
+
+    // Parse an explicit offset without converting UTC to local time.
+    // 06:04:02.001+01:00 represents 05:04:02.001 UTC.
+    S := '2014-01-01T06:04:02.001+01:00';
+    Dt := TJsonBaseObject.JSONToDateTime(S, False);
+    CheckEquals(ExpectDt, Dt, 'expected UTC datetime: ' + DateTimeToStr(ExpectDt) + ', returned: ' + DateTimeToStr(Dt));
 
   ExpectDt := EncodeDate(2016, 9, 29);
     S := TJsonBaseObject.DateTimeToJSON(ExpectDt, False);
@@ -2869,7 +2899,7 @@ begin
     CheckEqualsString('-1234567890123456789', O.O['MyObject'].S['Int64']);
     //CheckEquals(-1234567890123456789, O.O['MyObject'].I['Int64']);
     CheckEquals(-1234567890123456789, O.O['MyObject'].L['Int64']);
-    CheckEquals(FloatToStr(-1234567890123456789), FloatToStr(O.O['MyObject'].F['Int64']));
+    CheckEquals(FloatToStr(-1234567890123456789.0), FloatToStr(O.O['MyObject'].F['Int64']));
     CheckEquals(True, O.O['MyObject'].B['Int64']);
 
     CheckEqualsString('-12.3456789', O.O['MyObject'].S['Float']);
@@ -3118,9 +3148,9 @@ type
   published
     property _NoCase: Boolean read FNoCase write FNoCase;
     property LowerCase: string read FLowerCase write FLowerCase;
-    {$IFDEF UNICODE} // Delphi 2005+ compilers allow unicode identifiers, even if that is a very bad idea
+    {$IFDEF SUPPORTS_UNICODE_IDENTIFIERS} // Delphi 2005+ compilers allow unicode identifiers, even if that is a very bad idea
     property Änderung: string read FAenderung write FAenderung;
-    {$ENDIF UNICODE}
+    {$ENDIF SUPPORTS_UNICODE_IDENTIFIERS}
   end;
 
 procedure TestTJsonObject.TestFromSimpleObjectLowerCamelCase;
@@ -3135,23 +3165,23 @@ begin
     try
       Obj._NoCase := True;
       Obj.LowerCase := 'LowerCase';
-      {$IFDEF UNICODE} // Delphi 2005+ compilers allow unicode identifiers, even if that is a very bad idea
+      {$IFDEF SUPPORTS_UNICODE_IDENTIFIERS} // Delphi 2005+ compilers allow unicode identifiers, even if that is a very bad idea
       Obj.Änderung := 'Änderung';
-      {$ENDIF UNICODE}
+      {$ENDIF SUPPORTS_UNICODE_IDENTIFIERS}
 
       O.FromSimpleObject(Obj, True);
 
-      {$IFDEF UNICODE}
+      {$IFDEF SUPPORTS_UNICODE_IDENTIFIERS}
       CheckEquals(3, O.Count);
       {$ELSE}
       CheckEquals(2, O.Count);
-      {$ENDIF UNICODE}
+      {$ENDIF SUPPORTS_UNICODE_IDENTIFIERS}
 
       CheckEqualsString('_NoCase', O.Names[0]);
       CheckEqualsString('lowerCase', O.Names[1]);
-      {$IFDEF UNICODE}
+      {$IFDEF SUPPORTS_UNICODE_IDENTIFIERS}
       CheckEqualsString('änderung', O.Names[2]);
-      {$ENDIF UNICODE}
+      {$ENDIF SUPPORTS_UNICODE_IDENTIFIERS}
     finally
       Obj.Free;
     end;
@@ -3468,10 +3498,17 @@ end;
 
 initialization
   SetJsonGlobalAutoConvertDoubleStringFormatSettings(nil);
+  {$IFDEF FPC}
+  RegisterTest(TestTJsonBaseObject);
+  RegisterTest(TestTJsonArray);
+  RegisterTest(TestTJsonObject);
+  RegisterTest(TestValidJSON);
+  {$ELSE}
   RegisterTest(TestTJsonBaseObject.Suite);
   RegisterTest(TestTJsonArray.Suite);
   RegisterTest(TestTJsonObject.Suite);
   RegisterTest(TestValidJSON.Suite);
+  {$ENDIF}
 
 end.
 

@@ -1,8 +1,8 @@
 Json Data Objects
 =================
 
-This Delphi unit contains a JSON parser that supports Delphi 2009-10Seattle and the platforms
-Win32, Win64 and ARM Android (MacOS and iOS may work).
+This Pascal unit provides a JSON parser supporting Delphi 2009-13 Florence and FPC 3.0.0+, 
+with support for Win32, Win64, ARM Android and Linux (macOS and iOS may work).
 
 Clone with GIT
 --------------
